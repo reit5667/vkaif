@@ -17,6 +17,14 @@ protocol AppLogging: Sendable {
     func log(_ level: LogLevel, category: String, message: String, error: Error?)
 }
 
+// Удобные вызовы — в протоколе, чтобы работали при типе any AppLogging
+extension AppLogging {
+    func debug(_ category: String, _ message: String) { log(.debug, category: category, message: message) }
+    func info(_ category: String, _ message: String) { log(.info, category: category, message: message) }
+    func warning(_ category: String, _ message: String) { log(.warning, category: category, message: message) }
+    func error(_ category: String, _ message: String, error: Error? = nil) { log(.error, category: category, message: message, error: error) }
+}
+
 // MARK: - Логгер приложения
 
 /// Единая точка диагностики: сеть, авторизация, кэш.
@@ -61,11 +69,3 @@ final class AppLogger: AppLogging, @unchecked Sendable {
     }
 }
 
-// MARK: - Удобные вызовы
-
-extension AppLogger {
-    func debug(_ category: String, _ message: String) { log(.debug, category: category, message: message) }
-    func info(_ category: String, _ message: String) { log(.info, category: category, message: message) }
-    func warning(_ category: String, _ message: String) { log(.warning, category: category, message: message) }
-    func error(_ category: String, _ message: String, error: Error? = nil) { log(.error, category: category, message: message, error: error) }
-}
