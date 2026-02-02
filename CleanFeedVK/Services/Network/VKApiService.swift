@@ -128,4 +128,115 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "users.get ok, count=\(wrapper.response.count)")
         return wrapper.response
     }
+
+    // MARK: - photos.getAlbums
+
+    /// Альбомы пользователя (ownerId = nil — текущий).
+    func getPhotosAlbums(
+        token: String,
+        ownerId: Int? = nil,
+        count: Int = 50,
+        offset: Int = 0
+    ) async throws -> PhotosGetAlbumsResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        if let oid = ownerId { queryItems.append(URLQueryItem(name: "owner_id", value: String(oid))) }
+        guard var components = URLComponents(string: "\(baseURL)/photos.getAlbums") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let wrapper: VKResponse<PhotosGetAlbumsResponse> = try await network.request(VKResponse<PhotosGetAlbumsResponse>.self, from: request)
+        return wrapper.response
+    }
+
+    // MARK: - photos.get
+
+    /// Фото альбома. album_id: числовой или -15 для «Сохранённые».
+    func getPhotos(
+        token: String,
+        ownerId: Int,
+        albumId: Int,
+        count: Int = 50,
+        offset: Int = 0
+    ) async throws -> PhotosGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "album_id", value: String(albumId)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "extended", value: "0")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let wrapper: VKResponse<PhotosGetResponse> = try await network.request(VKResponse<PhotosGetResponse>.self, from: request)
+        return wrapper.response
+    }
+
+    // MARK: - friends.get
+
+    /// Список друзей (userId = nil — текущий).
+    func getFriends(
+        token: String,
+        userId: Int? = nil,
+        count: Int = 50,
+        offset: Int = 0,
+        fields: String = "photo_50"
+    ) async throws -> FriendsGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "order", value: "name"),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "fields", value: fields)
+        ]
+        if let uid = userId { queryItems.append(URLQueryItem(name: "user_id", value: String(uid))) }
+        guard var components = URLComponents(string: "\(baseURL)/friends.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let wrapper: VKResponse<FriendsGetResponse> = try await network.request(VKResponse<FriendsGetResponse>.self, from: request)
+        return wrapper.response
+    }
+
+    // MARK: - groups.get
+
+    /// Группы текущего пользователя.
+    func getGroups(
+        token: String,
+        count: Int = 50,
+        offset: Int = 0,
+        extended: Int = 1
+    ) async throws -> GroupsGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "extended", value: String(extended)),
+            URLQueryItem(name: "filter", value: "groups"),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/groups.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let wrapper: VKResponse<GroupsGetResponse> = try await network.request(VKResponse<GroupsGetResponse>.self, from: request)
+        return wrapper.response
+    }
 }

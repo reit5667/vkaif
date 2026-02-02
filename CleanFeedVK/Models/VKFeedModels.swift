@@ -200,3 +200,68 @@ struct VKUserDetail: Decodable {
     /// URL аватара для экрана профиля: photo_200 или photo_50.
     var avatarURL: String? { photo200 ?? photo50 }
 }
+
+// MARK: - photos.getAlbums
+
+struct PhotosGetAlbumsResponse: Decodable {
+    let count: Int
+    let items: [VKAlbum]
+}
+
+struct VKAlbum: Decodable {
+    let id: Int
+    let title: String
+    let size: Int
+    let thumbId: Int?
+    let thumbSrc: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case size
+        case thumbId = "thumb_id"
+        case thumbSrc = "thumb_src"
+    }
+
+    var thumbURL: String? { thumbSrc }
+}
+
+// MARK: - photos.get
+
+struct PhotosGetResponse: Decodable {
+    let count: Int
+    let items: [VKPhoto]
+}
+
+// MARK: - friends.get
+
+struct FriendsGetResponse: Decodable {
+    let count: Int
+    let items: [VKFriend]
+}
+
+struct VKFriend: Decodable {
+    let id: Int
+    let firstName: String?
+    let lastName: String?
+    let photo50: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case photo50 = "photo_50"
+    }
+
+    var displayName: String {
+        let name = [firstName, lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        return name.isEmpty ? "ID\(id)" : name
+    }
+}
+
+// MARK: - groups.get
+
+struct GroupsGetResponse: Decodable {
+    let count: Int
+    let items: [VKGroup]
+}

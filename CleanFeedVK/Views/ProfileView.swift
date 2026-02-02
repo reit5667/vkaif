@@ -10,8 +10,21 @@ struct ProfileView: View {
 
     @State private var loadState: ProfileLoadState = .idle
     @State private var user: VKUserDetail?
+    @State private var selectedTab: ProfileTab = .photo
+    @State private var isAvatarFullScreenPresented = false
 
     private let vkApi = VKApiService()
+
+    private enum ProfileTab: String, CaseIterable {
+        case photo = "Фото"
+        case friends = "Друзья"
+        case groups = "Группы"
+    }
+
+    /// Группы — только у текущего пользователя; у друга вкладку не показываем.
+    private var availableTabs: [ProfileTab] {
+        userId == nil ? ProfileTab.allCases : [.photo, .friends]
+    }
 
     var body: some View {
         Group {
@@ -59,8 +72,37 @@ struct ProfileView: View {
                 if let status = user.status, !status.isEmpty {
                     statusSection(status: status)
                 }
+                Picker("", selection: $selectedTab) {
+                    ForEach(availableTabs, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                tabContent(user: user)
             }
             .padding()
+        }
+        .fullScreenCover(isPresented: $isAvatarFullScreenPresented) {
+            if let urlString = user.avatarURL, let url = URL(string: urlString) {
+                FullScreenImageView(imageURL: url) { isAvatarFullScreenPresented = false }
+            }
+        }
+        .onAppear {
+            if !availableTabs.contains(selectedTab) {
+                selectedTab = availableTabs.first ?? .photo
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tabContent(user: VKUserDetail) -> some View {
+        switch selectedTab {
+        case .photo:
+            ProfilePhotoTabView(authService: authService, ownerId: user.id)
+        case .friends:
+            ProfileFriendsTabView(authService: authService, ownerId: userId ?? user.id)
+        case .groups:
+            ProfileGroupsTabView(authService: authService)
         }
     }
 
@@ -92,6 +134,7 @@ struct ProfileView: View {
                     .frame(width: 120, height: 120)
             }
         }
+        .onTapGesture { isAvatarFullScreenPresented = true }
     }
 
     private func nameSection(user: VKUserDetail) -> some View {
