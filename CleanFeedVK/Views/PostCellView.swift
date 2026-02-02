@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Ячейка поста ленты
 
-/// Заголовок: аватар, имя, относительная дата. Тело: текст с «Показать ещё». Медиа: заглушка.
+/// Заголовок: аватар, имя, относительная дата. Тело: текст с «Показать ещё». Медиа: сетка фото (1–10).
 struct PostCellView: View {
 
     let post: VKPost
@@ -13,13 +13,21 @@ struct PostCellView: View {
     @State private var isTextExpanded = false
     private let textLineLimitCollapsed = 3
 
+    /// URL только фото из вложений (для сетки).
+    private var photoURLs: [String] {
+        guard let attachments = post.attachments else { return [] }
+        return attachments.compactMap { $0.photo?.displayURL }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if !post.text.isEmpty {
                 bodyText
             }
-            if hasMedia {
+            if !photoURLs.isEmpty {
+                photoGridView
+            } else if hasNonPhotoMedia {
                 mediaPlaceholder
             }
         }
@@ -99,16 +107,51 @@ struct PostCellView: View {
 
     // MARK: - Media
 
-    private var hasMedia: Bool {
-        guard let attachments = post.attachments, !attachments.isEmpty else { return false }
-        return attachments.contains { $0.photo != nil || $0.video != nil || $0.link != nil }
+    private var hasNonPhotoMedia: Bool {
+        guard let attachments = post.attachments else { return false }
+        return attachments.contains { $0.video != nil || $0.link != nil }
+    }
+
+    /// Сетка фото: 1 — во всю ширину, 2 — два столбца, 3+ — до 3 столбцов.
+    private var photoGridView: some View {
+        let count = photoURLs.count
+        let columnsCount = count == 1 ? 1 : (count == 2 ? 2 : min(3, count))
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: columnsCount)
+
+        return LazyVGrid(columns: columns, spacing: 4) {
+            ForEach(Array(photoURLs.enumerated()), id: \.offset) { _, urlString in
+                if let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .failure:
+                            Image(systemName: "photo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .foregroundColor(.secondary)
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            ProgressView()
+                        }
+                    }
+                    .frame(minHeight: count == 1 ? 200 : 120)
+                    .frame(maxWidth: count == 1 ? .infinity : nil)
+                    .clipped()
+                    .cornerRadius(8)
+                }
+            }
+        }
     }
 
     private var mediaPlaceholder: some View {
         HStack {
             Image(systemName: "photo.on.rectangle.angled")
                 .foregroundColor(.secondary)
-            Text("Медиа")
+            Text("Видео / ссылка")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

@@ -100,6 +100,18 @@ struct VKAttachment: Decodable {
 struct VKPhoto: Decodable {
     let id: Int
     let sizes: [VKPhotoSize]?
+
+    /// URL для отображения в ленте: приоритет x (604px) → m (130px) → s (75px) → первый доступный.
+    var displayURL: String? {
+        guard let sizes = sizes, !sizes.isEmpty else { return nil }
+        let order = ["x", "m", "s"]
+        for type in order {
+            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
+                return url
+            }
+        }
+        return sizes.first?.url
+    }
 }
 
 struct VKPhotoSize: Decodable {

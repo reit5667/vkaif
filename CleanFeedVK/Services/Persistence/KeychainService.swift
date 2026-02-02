@@ -19,9 +19,9 @@ final class KeychainService {
     private let service: String
     private let logger: AppLogging?
 
-    init(
+    nonisolated init(
         service: String = Bundle.main.bundleIdentifier ?? "CleanFeedVK",
-        logger: AppLogging? = AppLogger.shared
+        logger: (any AppLogging)? = nil
     ) {
         self.service = service
         self.logger = logger
@@ -54,11 +54,11 @@ final class KeychainService {
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         if status != errSecSuccess {
-            logger?.error("Keychain", "save failed for key=\(key)", error: KeychainError.saveFailed(status))
+            (logger ?? AppLogger.shared).error("Keychain", "save failed for key=\(key)", error: KeychainError.saveFailed(status))
             throw KeychainError.saveFailed(status)
         }
 
-        logger?.info("Keychain", "saved key=\(key)")
+        (logger ?? AppLogger.shared).info("Keychain", "saved key=\(key)")
     }
 
     // MARK: - Чтение
@@ -77,12 +77,12 @@ final class KeychainService {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
         if status == errSecItemNotFound {
-            logger?.debug("Keychain", "key=\(key) not found")
+            (logger ?? AppLogger.shared).debug("Keychain", "key=\(key) not found")
             return nil
         }
 
         guard status == errSecSuccess else {
-            logger?.error("Keychain", "read failed for key=\(key)", error: KeychainError.readFailed(status))
+            (logger ?? AppLogger.shared).error("Keychain", "read failed for key=\(key)", error: KeychainError.readFailed(status))
             throw KeychainError.readFailed(status)
         }
 
@@ -90,7 +90,7 @@ final class KeychainService {
             throw KeychainError.unexpectedData
         }
 
-        logger?.debug("Keychain", "read key=\(key)")
+        (logger ?? AppLogger.shared).debug("Keychain", "read key=\(key)")
         return value
     }
 
@@ -106,10 +106,10 @@ final class KeychainService {
 
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
-            logger?.error("Keychain", "delete failed for key=\(key)", error: KeychainError.deleteFailed(status))
+            (logger ?? AppLogger.shared).error("Keychain", "delete failed for key=\(key)", error: KeychainError.deleteFailed(status))
             throw KeychainError.deleteFailed(status)
         }
 
-        logger?.info("Keychain", "deleted key=\(key)")
+        (logger ?? AppLogger.shared).info("Keychain", "deleted key=\(key)")
     }
 }

@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var feedPosts: [VKPost] = []
     @State private var feedProfiles: [VKProfile] = []
     @State private var feedGroups: [VKGroup] = []
+    @State private var nextFrom: String? = nil       // курсор для подгрузки
+    @State private var isLoadingMore: Bool = false  // подгрузка в конец
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -43,6 +45,19 @@ struct ContentView: View {
                     .padding(.vertical, 8)
                     Divider()
                 }
+
+                // Триггер подгрузки при достижении конца
+                if nextFrom != nil {
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear { loadMoreFeed() }
+                }
+
+                if isLoadingMore {
+                    ProgressView("Ещё посты…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                }
             }
             .padding(.horizontal)
         }
@@ -65,6 +80,7 @@ struct ContentView: View {
                     feedPosts = []
                     feedProfiles = []
                     feedGroups = []
+                    nextFrom = nil
                 }
             }
         }
@@ -84,11 +100,11 @@ struct ContentView: View {
     }
 
     private func authorName(for post: VKPost) -> String {
-        authorName(for: post, profiles: feedProfiles, groups: feedGroups)
+        CleanFeedVK.authorName(for: post, profiles: feedProfiles, groups: feedGroups)
     }
 
     private func authorAvatarURL(for post: VKPost) -> String? {
-        authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
+        CleanFeedVK.authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
     }
 
     // MARK: - Views
@@ -177,6 +193,7 @@ struct ContentView: View {
 
     // MARK: - Загрузка ленты
 
+    /// Первая загрузка или обновление (заменяет ленту).
     private func loadFeed() {
         guard let token = authService.accessToken else { return }
         feedLoadState = .loading
@@ -191,6 +208,7 @@ struct ContentView: View {
                     feedPosts = filtered
                     feedProfiles = response.profiles ?? []
                     feedGroups = response.groups ?? []
+                    nextFrom = response.nextFrom
                     feedLoadState = .loaded(count: filtered.count)
                 }
                 printFeedToConsole(posts: filtered, nextFrom: response.nextFrom)
@@ -200,6 +218,48 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Подгрузка следующей страницы в конец ленты.
+    private func loadMoreFeed() {
+        guard let token = authService.accessToken,
+              let from = nextFrom,
+              !from.isEmpty,
+              !feedLoadState.isLoading,
+              !isLoadingMore else { return }
+        isLoadingMore = true
+        Task {
+            do {
+                let response = try await vkApi.getNewsfeed(token: token, startFrom: from)
+                let filtered = feedFilter.filter(response.items)
+                await MainActor.run {
+                    feedPosts.append(contentsOf: filtered)
+                    mergeProfiles(response.profiles ?? [])
+                    mergeGroups(response.groups ?? [])
+                    nextFrom = response.nextFrom
+                    isLoadingMore = false
+                }
+                if !filtered.isEmpty {
+                    print("[CleanFeedVK] Подгружено ещё \(filtered.count) постов, next_from: \(response.nextFrom ?? "nil")")
+                }
+            } catch {
+                await MainActor.run {
+                    isLoadingMore = false
+                }
+            }
+        }
+    }
+
+    private func mergeProfiles(_ new: [VKProfile]) {
+        let existingIds = Set(feedProfiles.map(\.id))
+        let toAdd = new.filter { !existingIds.contains($0.id) }
+        if !toAdd.isEmpty { feedProfiles.append(contentsOf: toAdd) }
+    }
+
+    private func mergeGroups(_ new: [VKGroup]) {
+        let existingIds = Set(feedGroups.map(\.id))
+        let toAdd = new.filter { !existingIds.contains($0.id) }
+        if !toAdd.isEmpty { feedGroups.append(contentsOf: toAdd) }
     }
 
     private func printFeedToConsole(posts: [VKPost], nextFrom: String?) {

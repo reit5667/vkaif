@@ -51,11 +51,11 @@ final class AuthService: ObservableObject {
     // MARK: - Init
 
     init(
-        keychain: KeychainService = KeychainService(),
-        logger: AppLogging? = AppLogger.shared
+        keychain: KeychainService = KeychainService(logger: nil),
+        logger: (any AppLogging)? = nil
     ) {
         self.keychain = keychain
-        self.logger = logger
+        self.logger = logger ?? AppLogger.shared
 
         // При старте пытаемся загрузить токен из Keychain
         loadTokenFromKeychain()
