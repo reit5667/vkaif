@@ -33,6 +33,7 @@ struct VKPost: Decodable {
     let text: String
     let markedAsAds: Int?
     let postType: String?
+    let sourceType: String?
     let attachments: [VKAttachment]?
     let copyHistory: [VKPost]?
 
@@ -44,6 +45,7 @@ struct VKPost: Decodable {
         case text
         case markedAsAds = "marked_as_ads"
         case postType = "post_type"
+        case sourceType = "source_type"
         case attachments
         case copyHistory = "copy_history"
     }
@@ -59,6 +61,7 @@ struct VKPost: Decodable {
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         markedAsAds = try c.decodeIfPresent(Int.self, forKey: .markedAsAds)
         postType = try c.decodeIfPresent(String.self, forKey: .postType)
+        sourceType = try c.decodeIfPresent(String.self, forKey: .sourceType)
         attachments = try c.decodeIfPresent([VKAttachment].self, forKey: .attachments)
         copyHistory = try c.decodeIfPresent([VKPost].self, forKey: .copyHistory)
     }

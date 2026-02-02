@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var feedLoadState: FeedLoadState = .idle
 
     private let vkApi = VKApiService()
+    private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
 
     var body: some View {
         NavigationView {
@@ -126,11 +127,15 @@ struct ContentView: View {
         Task {
             do {
                 let response = try await vkApi.getNewsfeed(token: token)
-                await MainActor.run {
-                    feedLoadState = .loaded(count: response.items.count)
+                let filtered = feedFilter.filter(response.items)
+                if response.items.count != filtered.count {
+                    print("[CleanFeedVK] Фильтр: было \(response.items.count), осталось \(filtered.count)")
                 }
-                // Вывод в консоль для диагностики
-                printFeedToConsole(response)
+                await MainActor.run {
+                    feedLoadState = .loaded(count: filtered.count)
+                }
+                // Вывод в консоль (уже отфильтрованная лента)
+                printFeedToConsole(posts: filtered, nextFrom: response.nextFrom)
             } catch {
                 await MainActor.run {
                     feedLoadState = .failed(error)
@@ -139,14 +144,14 @@ struct ContentView: View {
         }
     }
 
-    private func printFeedToConsole(_ response: NewsfeedGetResponse) {
-        print("[CleanFeedVK] ——— Лента: \(response.items.count) постов ———")
-        for (i, post) in response.items.enumerated() {
+    private func printFeedToConsole(posts: [VKPost], nextFrom: String?) {
+        print("[CleanFeedVK] ——— Лента (после фильтра): \(posts.count) постов ———")
+        for (i, post) in posts.enumerated() {
             let preview = String(post.text.prefix(60))
             let more = post.text.count > 60 ? "…" : ""
             print("[\(i + 1)] \(preview)\(more) | date=\(post.date)")
         }
-        if let next = response.nextFrom {
+        if let next = nextFrom {
             print("next_from: \(next)")
         }
         print("[CleanFeedVK] ——— конец ленты ———")
