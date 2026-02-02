@@ -165,3 +165,38 @@ struct VKGroup: Decodable {
         case photo50 = "photo_50"
     }
 }
+
+// MARK: - users.get — профиль пользователя (экран профиля)
+
+/// Ответ users.get — массив пользователей (response — массив, не объект).
+struct UsersGetResponse: Decodable {
+    let response: [VKUserDetail]
+}
+
+/// Профиль пользователя из users.get (аватар, имя, статус).
+struct VKUserDetail: Decodable {
+    let id: Int
+    let firstName: String?
+    let lastName: String?
+    let photo50: String?
+    let photo200: String?
+    let status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case photo50 = "photo_50"
+        case photo200 = "photo_200"
+        case status
+    }
+
+    var displayName: String {
+        let name = [firstName, lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "ID\(id)" : name
+    }
+
+    /// URL аватара для экрана профиля: photo_200 или photo_50.
+    var avatarURL: String? { photo200 ?? photo50 }
+}

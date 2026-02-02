@@ -17,15 +17,49 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             Group {
-                if !feedPosts.isEmpty {
-                    feedListView
+                if case .authenticated = authService.state {
+                    TabView {
+                        NavigationStack {
+                            feedTabContent
+                        }
+                        .tabItem { Label("Лента", systemImage: "list.bullet.rectangle") }
+                        NavigationStack {
+                            ProfileView(authService: authService)
+                        }
+                        .tabItem { Label("Профиль", systemImage: "person.circle") }
+                    }
                 } else {
                     mainContentStack
                 }
             }
-            .navigationTitle("Главная")
             .sheet(isPresented: $showAuthView) {
                 AuthView(authService: authService)
+            }
+        }
+    }
+
+    private var feedTabContent: some View {
+        Group {
+            if !feedPosts.isEmpty {
+                feedListView
+            } else {
+                mainContentStack
+            }
+        }
+        .navigationTitle("Главная")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Обновить") { loadFeed() }
+                    .disabled(feedLoadState.isLoading)
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Выйти") {
+                    authService.logout()
+                    feedPosts = []
+                    feedProfiles = []
+                    feedGroups = []
+                    nextFrom = nil
+                }
             }
         }
     }
@@ -67,21 +101,6 @@ struct ContentView: View {
                     .padding(8)
                     .background(.ultraThinMaterial)
                     .cornerRadius(8)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Обновить") { loadFeed() }
-                    .disabled(feedLoadState.isLoading)
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Выйти") {
-                    authService.logout()
-                    feedPosts = []
-                    feedProfiles = []
-                    feedGroups = []
-                    nextFrom = nil
-                }
             }
         }
     }
