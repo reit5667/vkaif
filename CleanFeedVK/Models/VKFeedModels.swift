@@ -44,6 +44,53 @@ struct WallGetResponse: Decodable {
     let items: [VKPost]
 }
 
+// MARK: - wall.getComments — комментарии к посту
+
+struct WallGetCommentsResponse: Decodable {
+    let count: Int
+    let items: [VKComment]
+    let profiles: [VKProfile]?
+    let groups: [VKGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case items
+        case profiles
+        case groups
+    }
+}
+
+/// Комментарий к посту (wall.getComments).
+struct VKComment: Decodable {
+    let id: Int
+    let fromId: Int
+    let date: Date
+    let text: String
+    let likes: VKCommentLikes?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fromId = "from_id"
+        case date
+        case text
+        case likes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        fromId = try c.decode(Int.self, forKey: .fromId)
+        let timestamp = try c.decode(Int.self, forKey: .date)
+        date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        likes = try c.decodeIfPresent(VKCommentLikes.self, forKey: .likes)
+    }
+}
+
+struct VKCommentLikes: Decodable {
+    let count: Int
+}
+
 // MARK: - Пост (элемент ленты)
 
 /// Лайки поста (newsfeed.get / wall.get).
@@ -104,7 +151,14 @@ struct VKPost: Decodable {
         attachments = try c.decodeIfPresent([VKAttachment].self, forKey: .attachments)
         copyHistory = try c.decodeIfPresent([VKPost].self, forKey: .copyHistory)
         likes = try c.decodeIfPresent(VKPostLikes.self, forKey: .likes)
-        comments = try c.decodeIfPresent(VKPostComments.self, forKey: .comments)
+        // VK: comments приходит как объект { "count": N } или иногда как число; fallback для совместимости.
+        if let commentsObj = try c.decodeIfPresent(VKPostComments.self, forKey: .comments) {
+            comments = commentsObj
+        } else if let commentsInt = try c.decodeIfPresent(Int.self, forKey: .comments) {
+            comments = VKPostComments(count: commentsInt)
+        } else {
+            comments = nil
+        }
     }
 
     var likesCount: Int { likes?.count ?? 0 }

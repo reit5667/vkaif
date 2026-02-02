@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var feedGroups: [VKGroup] = []
     @State private var nextFrom: String? = nil       // курсор для подгрузки
     @State private var isLoadingMore: Bool = false  // подгрузка в конец
+    @State private var commentsContext: PostCommentsContext? = nil
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -82,7 +83,14 @@ struct ContentView: View {
                         authorAvatarURL: authorAvatarURL(for: post),
                         relativeDate: relativeDateString(from: post.date),
                         authService: authService,
-                        feedDestination: feedDestination(for: post)
+                        feedDestination: feedDestination(for: post),
+                        onTapComments: post.commentsCount > 0 ? {
+                            commentsContext = PostCommentsContext(
+                                ownerId: post.ownerId ?? post.fromId ?? 0,
+                                postId: post.id,
+                                totalCount: post.commentsCount
+                            )
+                        } : nil
                     )
                     .padding(.vertical, 8)
                     Divider()
@@ -110,6 +118,9 @@ struct ContentView: View {
             case .user(let id):
                 ProfileView(authService: authService, userId: id)
             }
+        }
+        .sheet(item: $commentsContext) { ctx in
+            PostCommentsView(context: ctx, authService: authService)
         }
         .overlay(alignment: .top) {
             if feedLoadState.isLoading {

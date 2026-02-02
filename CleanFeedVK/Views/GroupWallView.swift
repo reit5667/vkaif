@@ -9,6 +9,7 @@ struct GroupWallView: View {
     @State private var group: VKGroup?
     @State private var posts: [VKPost] = []
     @State private var loadState: GroupWallLoadState = .idle
+    @State private var commentsContext: PostCommentsContext? = nil
 
     private let vkApi = VKApiService()
     private var ownerId: Int { -groupId }
@@ -39,7 +40,14 @@ struct GroupWallView: View {
                                 authorAvatarURL: group?.photo50,
                                 relativeDate: relativeDateString(from: post.date),
                                 authService: nil,
-                                feedDestination: nil
+                                feedDestination: nil,
+                                onTapComments: post.commentsCount > 0 ? {
+                                    commentsContext = PostCommentsContext(
+                                        ownerId: post.ownerId ?? ownerId,
+                                        postId: post.id,
+                                        totalCount: post.commentsCount
+                                    )
+                                } : nil
                             )
                             .padding(.vertical, 8)
                             Divider()
@@ -65,6 +73,9 @@ struct GroupWallView: View {
             }
         }
         .onAppear { load() }
+        .sheet(item: $commentsContext) { ctx in
+            PostCommentsView(context: ctx, authService: authService)
+        }
     }
 
     private func groupHeader(group: VKGroup) -> some View {

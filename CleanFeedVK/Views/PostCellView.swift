@@ -12,6 +12,8 @@ struct PostCellView: View {
     /// Для навигации из ленты: тап по автору → группа/профиль. nil в превью или на стене группы.
     var authService: AuthService? = nil
     var feedDestination: FeedDestination? = nil
+    /// Тап по счётчику комментариев → открыть экран комментариев. nil = не открывать.
+    var onTapComments: (() -> Void)? = nil
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
@@ -202,9 +204,18 @@ struct PostCellView: View {
                     .foregroundColor(.secondary)
             }
             if post.commentsCount > 0 {
-                Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if let onTap = onTapComments {
+                    Button(action: onTap) {
+                        Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }

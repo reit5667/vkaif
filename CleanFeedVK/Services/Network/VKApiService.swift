@@ -103,6 +103,9 @@ final class VKApiService: Sendable {
         }
 
         logger?.info("VKApi", "newsfeed.get ok, items=\(wrapper.response.items.count)")
+        if let first = wrapper.response.items.first {
+            logger?.info("VKApi", "newsfeed.get first post: postId=\(first.postId) likes=\(first.likesCount) comments=\(first.commentsCount)")
+        }
         return wrapper.response
     }
 
@@ -326,6 +329,43 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "wall.get ownerId=\(ownerId)")
         let response = try await requestVK(WallGetResponse.self, from: request)
         logger?.info("VKApi", "wall.get ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - wall.getComments
+
+    /// Комментарии к посту. ownerId — владелец стены (знак сохраняется: группа отрицательная).
+    /// sort: asc (старые первые) или desc (новые первые). Пагинация: offset, count (по 5).
+    func getWallComments(
+        token: String,
+        ownerId: Int,
+        postId: Int,
+        offset: Int = 0,
+        count: Int = 5,
+        sort: String = "asc",
+        needLikes: Int = 1,
+        extended: Int = 1
+    ) async throws -> WallGetCommentsResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "post_id", value: String(postId)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "sort", value: sort),
+            URLQueryItem(name: "need_likes", value: String(needLikes)),
+            URLQueryItem(name: "extended", value: String(extended))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.getComments") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.getComments ownerId=\(ownerId) postId=\(postId) offset=\(offset)")
+        let response = try await requestVK(WallGetCommentsResponse.self, from: request)
+        logger?.info("VKApi", "wall.getComments ok count=\(response.count) items=\(response.items.count)")
         return response
     }
 }
