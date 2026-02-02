@@ -9,6 +9,9 @@ struct PostCellView: View {
     let authorName: String
     let authorAvatarURL: String?
     let relativeDate: String
+    /// Для навигации из ленты: тап по автору → группа/профиль. nil в превью или на стене группы.
+    var authService: AuthService? = nil
+    var feedDestination: FeedDestination? = nil
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
@@ -33,6 +36,9 @@ struct PostCellView: View {
             } else if hasNonPhotoMedia {
                 mediaPlaceholder
             }
+            if post.likesCount > 0 || post.commentsCount > 0 {
+                likesCommentsRow
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,9 +57,9 @@ struct PostCellView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Header (тап → группа или профиль, если передан feedDestination)
 
-    private var header: some View {
+    private var headerContent: some View {
         HStack(alignment: .top, spacing: 10) {
             avatarView
             VStack(alignment: .leading, spacing: 2) {
@@ -65,6 +71,15 @@ struct PostCellView: View {
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if let dest = feedDestination {
+            NavigationLink(value: dest) { headerContent }
+        } else {
+            headerContent
         }
     }
 
@@ -176,6 +191,23 @@ struct PostCellView: View {
         .background(Color(.systemGray6))
         .cornerRadius(8)
     }
+
+    // MARK: - Лайки / комментарии (счётчики)
+
+    private var likesCommentsRow: some View {
+        HStack(spacing: 16) {
+            if post.likesCount > 0 {
+                Label("\(post.likesCount)", systemImage: "heart.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if post.commentsCount > 0 {
+                Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
 }
 
 // MARK: - Helpers
@@ -239,7 +271,7 @@ func authorAvatarURL(for post: VKPost, profiles: [VKProfile], groups: [VKGroup])
 
 // Инициализатор для превью (VKPost из Decoder только)
 extension VKPost {
-    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?) {
+    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?, likes: VKPostLikes? = nil, comments: VKPostComments? = nil) {
         self.id = id
         self.fromId = fromId
         self.ownerId = ownerId
@@ -250,5 +282,7 @@ extension VKPost {
         self.sourceType = sourceType
         self.attachments = attachments
         self.copyHistory = copyHistory
+        self.likes = likes
+        self.comments = comments
     }
 }

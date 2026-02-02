@@ -1,19 +1,21 @@
 import SwiftUI
 
-/// Экран профиля: свой или друга (users.get).
-/// При userId == nil загружается текущий пользователь.
+/// Экран профиля: свой или друга. Composition: Header (users.get) + вкладки загружаются асинхронно и независимо через ProfileViewModel.
 struct ProfileView: View {
 
     @ObservedObject var authService: AuthService
     /// ID друга для просмотра; nil = свой профиль.
     var userId: Int? = nil
 
-    @State private var loadState: ProfileLoadState = .idle
-    @State private var user: VKUserDetail?
+    @StateObject private var viewModel: ProfileViewModel
     @State private var selectedTab: ProfileTab = .photo
     @State private var isAvatarFullScreenPresented = false
 
-    private let vkApi = VKApiService()
+    init(authService: AuthService, userId: Int? = nil) {
+        self.authService = authService
+        self.userId = userId
+        _viewModel = StateObject(wrappedValue: ProfileViewModel(authService: authService, userId: userId))
+    }
 
     private enum ProfileTab: String, CaseIterable {
         case photo = "Фото"
@@ -28,12 +30,12 @@ struct ProfileView: View {
 
     var body: some View {
         Group {
-            switch loadState {
+            switch viewModel.userLoadState {
             case .idle, .loading:
                 ProgressView("Загрузка профиля…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded:
-                if let u = user {
+                if let u = viewModel.user {
                     profileContent(user: u)
                 } else {
                     ContentUnavailableView("Профиль не найден", systemImage: "person.slash")
@@ -52,16 +54,16 @@ struct ProfileView: View {
                 )
             }
         }
-        .navigationTitle(user?.displayName ?? "Профиль")
+        .navigationTitle(viewModel.user?.displayName ?? "Профиль")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if case .loaded = loadState {
-                    Button("Обновить") { loadProfile() }
+                if case .loaded = viewModel.userLoadState {
+                    Button("Обновить") { viewModel.refreshAll() }
                 }
             }
         }
-        .onAppear { loadProfile() }
+        .onAppear { viewModel.loadProfileIfNeeded() }
     }
 
     private func profileContent(user: VKUserDetail) -> some View {
@@ -98,11 +100,27 @@ struct ProfileView: View {
     private func tabContent(user: VKUserDetail) -> some View {
         switch selectedTab {
         case .photo:
-            ProfilePhotoTabView(authService: authService, ownerId: user.id)
+            ProfilePhotoTabView(
+                albums: viewModel.albums,
+                loadState: viewModel.albumsLoadState,
+                authService: authService,
+                ownerId: user.id,
+                onRefresh: { await viewModel.loadAlbums(forceRefresh: true) }
+            )
         case .friends:
-            ProfileFriendsTabView(authService: authService, ownerId: userId ?? user.id)
+            ProfileFriendsTabView(
+                friends: viewModel.friends,
+                loadState: viewModel.friendsLoadState,
+                authService: authService,
+                onRefresh: { await viewModel.loadFriends(forceRefresh: true) }
+            )
         case .groups:
-            ProfileGroupsTabView(authService: authService)
+            ProfileGroupsTabView(
+                groups: viewModel.groups,
+                loadState: viewModel.groupsLoadState,
+                authService: authService,
+                onRefresh: { await viewModel.loadGroups(forceRefresh: true) }
+            )
         }
     }
 
@@ -155,28 +173,6 @@ struct ProfileView: View {
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(8)
-    }
-
-    private func loadProfile() {
-        guard let token = authService.accessToken else {
-            loadState = .notAuthenticated
-            return
-        }
-        loadState = .loading
-        let ids: [String]? = userId.map { [String(describing: $0)] }
-        Task {
-            do {
-                let users = try await vkApi.getUsers(token: token, userIds: ids)
-                await MainActor.run {
-                    user = users.first
-                    loadState = .loaded
-                }
-            } catch {
-                await MainActor.run {
-                    loadState = .failed(error)
-                }
-            }
-        }
     }
 }
 

@@ -182,7 +182,10 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        return try await requestVK(PhotosGetAlbumsResponse.self, from: request)
+        logger?.info("VKApi", "photos.getAlbums ownerId=\(ownerId.map { String($0) } ?? "current")")
+        let response = try await requestVK(PhotosGetAlbumsResponse.self, from: request)
+        logger?.info("VKApi", "photos.getAlbums ok count=\(response.count) items=\(response.items.count)")
+        return response
     }
 
     // MARK: - photos.get
@@ -241,7 +244,10 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        return try await requestVK(FriendsGetResponse.self, from: request)
+        logger?.info("VKApi", "friends.get userId=\(userId.map { String($0) } ?? "current")")
+        let response = try await requestVK(FriendsGetResponse.self, from: request)
+        logger?.info("VKApi", "friends.get ok count=\(response.count) items=\(response.items.count)")
+        return response
     }
 
     // MARK: - groups.get
@@ -267,6 +273,59 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        return try await requestVK(GroupsGetResponse.self, from: request)
+        logger?.info("VKApi", "groups.get")
+        let response = try await requestVK(GroupsGetResponse.self, from: request)
+        logger?.info("VKApi", "groups.get ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - groups.getById
+
+    /// Информация о группе по ID (положительный id, например 12345).
+    func getGroupById(token: String, groupId: Int) async throws -> VKGroup? {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "group_ids", value: String(groupId)),
+            URLQueryItem(name: "extended", value: "0")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/groups.getById") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "groups.getById groupId=\(groupId)")
+        let groups: [VKGroup] = try await requestVK([VKGroup].self, from: request)
+        logger?.info("VKApi", "groups.getById ok count=\(groups.count)")
+        return groups.first
+    }
+
+    // MARK: - wall.get
+
+    /// Стена: посты группы (ownerId < 0) или пользователя (ownerId > 0).
+    func getWall(
+        token: String,
+        ownerId: Int,
+        count: Int = 20,
+        offset: Int = 0
+    ) async throws -> WallGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.get ownerId=\(ownerId)")
+        let response = try await requestVK(WallGetResponse.self, from: request)
+        logger?.info("VKApi", "wall.get ok count=\(response.count) items=\(response.items.count)")
+        return response
     }
 }

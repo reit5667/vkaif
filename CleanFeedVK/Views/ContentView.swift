@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Навигация из ленты: тап по автору поста → группа или профиль пользователя.
+enum FeedDestination: Hashable {
+    case group(id: Int)
+    case user(id: Int)
+}
+
 struct ContentView: View {
 
     @StateObject private var authService = AuthService()
@@ -74,7 +80,9 @@ struct ContentView: View {
                         post: post,
                         authorName: authorName(for: post),
                         authorAvatarURL: authorAvatarURL(for: post),
-                        relativeDate: relativeDateString(from: post.date)
+                        relativeDate: relativeDateString(from: post.date),
+                        authService: authService,
+                        feedDestination: feedDestination(for: post)
                     )
                     .padding(.vertical, 8)
                     Divider()
@@ -94,6 +102,14 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal)
+        }
+        .navigationDestination(for: FeedDestination.self) { dest in
+            switch dest {
+            case .group(let id):
+                GroupWallView(authService: authService, groupId: id)
+            case .user(let id):
+                ProfileView(authService: authService, userId: id)
+            }
         }
         .overlay(alignment: .top) {
             if feedLoadState.isLoading {
@@ -124,6 +140,15 @@ struct ContentView: View {
 
     private func authorAvatarURL(for post: VKPost) -> String? {
         CleanFeedVK.authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
+    }
+
+    private func feedDestination(for post: VKPost) -> FeedDestination? {
+        guard let id = post.ownerId ?? post.fromId else { return nil }
+        if id < 0 {
+            return .group(id: abs(id))
+        } else {
+            return .user(id: id)
+        }
     }
 
     // MARK: - Views

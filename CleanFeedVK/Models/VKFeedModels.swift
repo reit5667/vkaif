@@ -37,7 +37,24 @@ struct NewsfeedGetResponse: Decodable {
     }
 }
 
+// MARK: - wall.get — ответ (лента группы)
+
+struct WallGetResponse: Decodable {
+    let count: Int
+    let items: [VKPost]
+}
+
 // MARK: - Пост (элемент ленты)
+
+/// Лайки поста (newsfeed.get / wall.get).
+struct VKPostLikes: Decodable {
+    let count: Int
+}
+
+/// Комментарии поста (newsfeed.get / wall.get).
+struct VKPostComments: Decodable {
+    let count: Int
+}
 
 struct VKPost: Decodable {
     let id: Int
@@ -53,6 +70,10 @@ struct VKPost: Decodable {
     let sourceType: String?
     let attachments: [VKAttachment]?
     let copyHistory: [VKPost]?
+    /// Счётчик лайков (если вернул API).
+    let likes: VKPostLikes?
+    /// Счётчик комментариев (если вернул API).
+    let comments: VKPostComments?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -65,6 +86,8 @@ struct VKPost: Decodable {
         case sourceType = "source_type"
         case attachments
         case copyHistory = "copy_history"
+        case likes
+        case comments
     }
 
     init(from decoder: Decoder) throws {
@@ -72,7 +95,6 @@ struct VKPost: Decodable {
         id = try c.decode(Int.self, forKey: .id)
         fromId = try c.decodeIfPresent(Int.self, forKey: .fromId)
         ownerId = try c.decodeIfPresent(Int.self, forKey: .ownerId)
-        // VK возвращает date как Unix timestamp (Int)
         let timestamp = try c.decode(Int.self, forKey: .date)
         date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
@@ -81,7 +103,12 @@ struct VKPost: Decodable {
         sourceType = try c.decodeIfPresent(String.self, forKey: .sourceType)
         attachments = try c.decodeIfPresent([VKAttachment].self, forKey: .attachments)
         copyHistory = try c.decodeIfPresent([VKPost].self, forKey: .copyHistory)
+        likes = try c.decodeIfPresent(VKPostLikes.self, forKey: .likes)
+        comments = try c.decodeIfPresent(VKPostComments.self, forKey: .comments)
     }
+
+    var likesCount: Int { likes?.count ?? 0 }
+    var commentsCount: Int { comments?.count ?? 0 }
 }
 
 // MARK: - Вложение (минимально: тип + опциональные поля)

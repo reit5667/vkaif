@@ -1,15 +1,14 @@
 import SwiftUI
 
-// MARK: - Вкладка «Фото»: альбомы + Сохранённые
+// MARK: - Вкладка «Фото»: альбомы + Сохранённые (данные передаются из ProfileView)
 
 struct ProfilePhotoTabView: View {
+    let albums: [VKAlbum]
+    let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
     let ownerId: Int
+    var onRefresh: () async -> Void
 
-    @State private var albums: [VKAlbum] = []
-    @State private var loadState: ProfileTabLoadState = .idle
-
-    private let vkApi = VKApiService()
     private static let savedAlbumId = -15
 
     var body: some View {
@@ -51,6 +50,7 @@ struct ProfilePhotoTabView: View {
                 )
             }
         }
+        .refreshable { await onRefresh() }
         .navigationDestination(for: AlbumDestination.self) { dest in
             AlbumPhotosView(
                 authService: authService,
@@ -59,7 +59,6 @@ struct ProfilePhotoTabView: View {
                 albumTitle: dest.title
             )
         }
-        .onAppear { loadAlbums() }
     }
 
     private func albumThumb(_ album: VKAlbum) -> some View {
@@ -83,22 +82,6 @@ struct ProfilePhotoTabView: View {
         .clipped()
         .cornerRadius(8)
     }
-
-    private func loadAlbums() {
-        guard let token = authService.accessToken else { return }
-        loadState = .loading
-        Task {
-            do {
-                let response = try await vkApi.getPhotosAlbums(token: token, ownerId: ownerId)
-                await MainActor.run {
-                    albums = response.items
-                    loadState = .loaded
-                }
-            } catch {
-                await MainActor.run { loadState = .failed(error) }
-            }
-        }
-    }
 }
 
 struct AlbumDestination: Hashable {
@@ -107,16 +90,13 @@ struct AlbumDestination: Hashable {
     let title: String
 }
 
-// MARK: - Вкладка «Друзья»
+// MARK: - Вкладка «Друзья» (данные передаются из ProfileView)
 
 struct ProfileFriendsTabView: View {
+    let friends: [VKFriend]
+    let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
-    let ownerId: Int?
-
-    @State private var friends: [VKFriend] = []
-    @State private var loadState: ProfileTabLoadState = .idle
-
-    private let vkApi = VKApiService()
+    var onRefresh: () async -> Void
 
     var body: some View {
         Group {
@@ -147,10 +127,10 @@ struct ProfileFriendsTabView: View {
                 )
             }
         }
+        .refreshable { await onRefresh() }
         .navigationDestination(for: Int.self) { friendId in
             ProfileView(authService: authService, userId: friendId)
         }
-        .onAppear { loadFriends() }
     }
 
     private func friendAvatar(_ friend: VKFriend) -> some View {
@@ -172,33 +152,15 @@ struct ProfileFriendsTabView: View {
         .frame(width: 44, height: 44)
         .clipShape(Circle())
     }
-
-    private func loadFriends() {
-        guard let token = authService.accessToken else { return }
-        loadState = .loading
-        Task {
-            do {
-                let response = try await vkApi.getFriends(token: token, userId: ownerId)
-                await MainActor.run {
-                    friends = response.items
-                    loadState = .loaded
-                }
-            } catch {
-                await MainActor.run { loadState = .failed(error) }
-            }
-        }
-    }
 }
 
-// MARK: - Вкладка «Группы»
+// MARK: - Вкладка «Группы» (данные передаются из ProfileView)
 
 struct ProfileGroupsTabView: View {
+    let groups: [VKGroup]
+    let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
-
-    @State private var groups: [VKGroup] = []
-    @State private var loadState: ProfileTabLoadState = .idle
-
-    private let vkApi = VKApiService()
+    var onRefresh: () async -> Void
 
     var body: some View {
         Group {
@@ -216,7 +178,6 @@ struct ProfileGroupsTabView: View {
                             Text(group.name ?? "Группа \(group.id)")
                                 .font(.body)
                         }
-                        // TODO: переход на страницу группы (wall)
                     }
                     .listStyle(.insetGrouped)
                 }
@@ -228,7 +189,7 @@ struct ProfileGroupsTabView: View {
                 )
             }
         }
-        .onAppear { loadGroups() }
+        .refreshable { await onRefresh() }
     }
 
     private func groupAvatar(_ group: VKGroup) -> some View {
@@ -249,22 +210,6 @@ struct ProfileGroupsTabView: View {
         }
         .frame(width: 44, height: 44)
         .clipShape(Circle())
-    }
-
-    private func loadGroups() {
-        guard let token = authService.accessToken else { return }
-        loadState = .loading
-        Task {
-            do {
-                let response = try await vkApi.getGroups(token: token)
-                await MainActor.run {
-                    groups = response.items
-                    loadState = .loaded
-                }
-            } catch {
-                await MainActor.run { loadState = .failed(error) }
-            }
-        }
     }
 }
 
