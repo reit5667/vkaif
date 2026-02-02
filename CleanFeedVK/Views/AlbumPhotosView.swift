@@ -10,7 +10,7 @@ struct AlbumPhotosView: View {
 
     @State private var photos: [VKPhoto] = []
     @State private var loadState: AlbumPhotosLoadState = .idle
-    @State private var fullScreenPhotoURL: URL?
+    @State private var fullScreenInitialIndex: Int = 0
     @State private var isFullScreenPresented = false
 
     private let vkApi = VKApiService()
@@ -46,8 +46,13 @@ struct AlbumPhotosView: View {
         .navigationTitle(albumTitle)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $isFullScreenPresented) {
-            if let url = fullScreenPhotoURL {
-                FullScreenImageView(imageURL: url) { isFullScreenPresented = false }
+            let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+            if !urls.isEmpty {
+                FullScreenPhotoGalleryView(
+                    urls: urls,
+                    initialIndex: min(fullScreenInitialIndex, urls.count - 1),
+                    onDismiss: { isFullScreenPresented = false }
+                )
             }
         }
         .onAppear { loadPhotos() }
@@ -81,8 +86,8 @@ struct AlbumPhotosView: View {
             }
         }
         .onTapGesture {
-            if let urlString = photo.displayURL, let url = URL(string: urlString) {
-                fullScreenPhotoURL = url
+            if let idx = photos.firstIndex(where: { $0.id == photo.id }) {
+                fullScreenInitialIndex = idx
                 isFullScreenPresented = true
             }
         }

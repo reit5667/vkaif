@@ -7,6 +7,20 @@ struct VKResponse<T: Decodable>: Decodable {
     let response: T
 }
 
+/// Ошибка VK API: при 200 OK тело может быть { "error": { "error_code", "error_msg" } }.
+struct VKErrorPayload: Decodable {
+    let errorCode: Int
+    let errorMsg: String?
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
+        case errorMsg = "error_msg"
+    }
+}
+
+struct VKErrorWrapper: Decodable {
+    let error: VKErrorPayload
+}
+
 // MARK: - newsfeed.get — ответ
 
 struct NewsfeedGetResponse: Decodable {
@@ -101,10 +115,10 @@ struct VKPhoto: Decodable {
     let id: Int
     let sizes: [VKPhotoSize]?
 
-    /// URL для отображения в ленте: приоритет x (604px) → m (130px) → s (75px) → первый доступный.
+    /// URL для отображения: приоритет размеров (x→m→s и w,z,y,r,q,p,o) → первый доступный.
     var displayURL: String? {
         guard let sizes = sizes, !sizes.isEmpty else { return nil }
-        let order = ["x", "m", "s"]
+        let order = ["x", "m", "s", "w", "z", "y", "r", "q", "p", "o"]
         for type in order {
             if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
                 return url
@@ -180,6 +194,9 @@ struct VKUserDetail: Decodable {
     let lastName: String?
     let photo50: String?
     let photo200: String?
+    let photo400: String?
+    let photoMax: String?
+    let photoMaxOrig: String?
     let status: String?
 
     enum CodingKeys: String, CodingKey {
@@ -188,6 +205,9 @@ struct VKUserDetail: Decodable {
         case lastName = "last_name"
         case photo50 = "photo_50"
         case photo200 = "photo_200"
+        case photo400 = "photo_400"
+        case photoMax = "photo_max"
+        case photoMaxOrig = "photo_max_orig"
         case status
     }
 
@@ -199,6 +219,9 @@ struct VKUserDetail: Decodable {
 
     /// URL аватара для экрана профиля: photo_200 или photo_50.
     var avatarURL: String? { photo200 ?? photo50 }
+
+    /// URL для полноэкранного просмотра: photo_max_orig → photo_max → photo_400 → photo_200. Качество зависит от того, что вернул VK.
+    var fullScreenAvatarURL: String? { photoMaxOrig ?? photoMax ?? photo400 ?? photo200 ?? photo50 }
 }
 
 // MARK: - photos.getAlbums

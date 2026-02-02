@@ -45,9 +45,9 @@ struct ProfilePhotoTabView: View {
                 .listStyle(.insetGrouped)
             case .failed(let error):
                 ContentUnavailableView(
-                    "Ошибка",
+                    "Ошибка загрузки альбомов",
                     systemImage: "exclamationmark.triangle.fill",
-                    description: Text(error.localizedDescription)
+                    description: Text("\(error.localizedDescription)\n\nПерелогиньтесь (Выйти → Войти) и выдайте права: друзья, фото, группы.")
                 )
             }
         }
@@ -141,9 +141,9 @@ struct ProfileFriendsTabView: View {
                 }
             case .failed(let error):
                 ContentUnavailableView(
-                    "Ошибка",
+                    "Ошибка загрузки друзей",
                     systemImage: "exclamationmark.triangle.fill",
-                    description: Text(error.localizedDescription)
+                    description: Text("\(error.localizedDescription)\n\nПерелогиньтесь (Выйти → Войти) и выдайте права: друзья, фото, группы.")
                 )
             }
         }
@@ -222,9 +222,9 @@ struct ProfileGroupsTabView: View {
                 }
             case .failed(let error):
                 ContentUnavailableView(
-                    "Ошибка",
+                    "Ошибка загрузки групп",
                     systemImage: "exclamationmark.triangle.fill",
-                    description: Text(error.localizedDescription)
+                    description: Text("\(error.localizedDescription)\n\nПерелогиньтесь (Выйти → Войти) и выдайте права: друзья, фото, группы.")
                 )
             }
         }

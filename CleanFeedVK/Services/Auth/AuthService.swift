@@ -31,7 +31,7 @@ final class AuthService: ObservableObject {
     // MARK: - Конфигурация VK OAuth
 
     private let appID = "2685278"              // Kate Mobile
-    private let scope = "wall,offline"         // Разрешения: лента + бессрочный токен
+    private let scope = "wall,offline,friends,photos,groups"  // лента, друзья, альбомы, группы
     private let redirectURI = "https://oauth.vk.com/blank.html"
     private let display = "mobile"             // Мобильная версия страницы входа
     private let responseType = "token"         // Implicit Flow

@@ -83,7 +83,7 @@ struct ProfileView: View {
             .padding()
         }
         .fullScreenCover(isPresented: $isAvatarFullScreenPresented) {
-            if let urlString = user.avatarURL, let url = URL(string: urlString) {
+            if let urlString = user.fullScreenAvatarURL, let url = URL(string: urlString) {
                 FullScreenImageView(imageURL: url) { isAvatarFullScreenPresented = false }
             }
         }

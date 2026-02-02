@@ -11,6 +11,7 @@ struct PostCellView: View {
     let relativeDate: String
 
     @State private var isTextExpanded = false
+    @State private var fullScreenPhotoIndex: Int? = nil
     private let textLineLimitCollapsed = 3
 
     /// URL только фото из вложений (для сетки).
@@ -18,6 +19,8 @@ struct PostCellView: View {
         guard let attachments = post.attachments else { return [] }
         return attachments.compactMap { $0.photo?.displayURL }
     }
+
+    private var photoURLsAsURLs: [URL] { photoURLs.compactMap { URL(string: $0) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -34,6 +37,18 @@ struct PostCellView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
+        .fullScreenCover(isPresented: Binding(
+            get: { fullScreenPhotoIndex != nil },
+            set: { if !$0 { fullScreenPhotoIndex = nil } }
+        )) {
+            if let idx = fullScreenPhotoIndex, !photoURLsAsURLs.isEmpty {
+                FullScreenPhotoGalleryView(
+                    urls: photoURLsAsURLs,
+                    initialIndex: min(idx, photoURLsAsURLs.count - 1),
+                    onDismiss: { fullScreenPhotoIndex = nil }
+                )
+            }
+        }
     }
 
     // MARK: - Header
@@ -119,7 +134,7 @@ struct PostCellView: View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: columnsCount)
 
         return LazyVGrid(columns: columns, spacing: 4) {
-            ForEach(Array(photoURLs.enumerated()), id: \.offset) { _, urlString in
+            ForEach(Array(photoURLs.enumerated()), id: \.offset) { index, urlString in
                 if let url = URL(string: urlString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
@@ -142,6 +157,7 @@ struct PostCellView: View {
                     .frame(maxWidth: count == 1 ? .infinity : nil)
                     .clipped()
                     .cornerRadius(8)
+                    .onTapGesture { fullScreenPhotoIndex = index }
                 }
             }
         }

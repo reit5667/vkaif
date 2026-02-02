@@ -2,10 +2,18 @@ import Foundation
 
 // MARK: - VK API Errors
 
-enum VKApiError: Error {
+enum VKApiError: Error, LocalizedError {
     case missingToken
     case invalidURL
     case apiError(code: Int, message: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingToken: return "Нет токена доступа"
+        case .invalidURL: return "Неверный URL"
+        case .apiError(let code, let msg): return msg ?? "Ошибка VK \(code)"
+        }
+    }
 }
 
 // MARK: - VK API Service
@@ -19,6 +27,7 @@ final class VKApiService: Sendable {
 
     private let network: any NetworkServiceProtocol
     private let logger: (any AppLogging)?
+    private let decoder = JSONDecoder()
 
     init(
         network: any NetworkServiceProtocol = NetworkService(),
@@ -26,6 +35,26 @@ final class VKApiService: Sendable {
     ) {
         self.network = network
         self.logger = logger
+    }
+
+    /// Запрос к VK API с разбором ошибки: при { "error": { "error_code", "error_msg" } } бросает VKApiError.apiError.
+    private func requestVK<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
+        let (data, response) = try await network.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            logger?.error("VKApi", "invalid response (not HTTPURLResponse)")
+            throw NetworkError.invalidResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            logger?.error("VKApi", "HTTP \(http.statusCode)", error: nil)
+            throw NetworkError.httpStatus(http.statusCode, data)
+        }
+        if let errWrapper = try? decoder.decode(VKErrorWrapper.self, from: data) {
+            let msg = errWrapper.error.errorMsg ?? "Ошибка VK \(errWrapper.error.errorCode)"
+            logger?.error("VKApi", "API error \(errWrapper.error.errorCode): \(msg)", error: nil)
+            throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
+        }
+        let wrapper = try decoder.decode(VKResponse<T>.self, from: data)
+        return wrapper.response
     }
 
     // MARK: - newsfeed.get
@@ -87,7 +116,7 @@ final class VKApiService: Sendable {
     func getUsers(
         token: String,
         userIds: [String]? = nil,
-        fields: String = "photo_200,status"
+        fields: String = "photo_200,photo_400,photo_max,photo_max_orig,status"
     ) async throws -> [VKUserDetail] {
         guard !token.isEmpty else {
             logger?.error("VKApi", "getUsers: empty token")
@@ -131,17 +160,19 @@ final class VKApiService: Sendable {
 
     // MARK: - photos.getAlbums
 
-    /// Альбомы пользователя (ownerId = nil — текущий).
+    /// Альбомы пользователя (ownerId = nil — текущий). need_covers=1 — превью в items.
     func getPhotosAlbums(
         token: String,
         ownerId: Int? = nil,
         count: Int = 50,
-        offset: Int = 0
+        offset: Int = 0,
+        needCovers: Int = 1
     ) async throws -> PhotosGetAlbumsResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "need_covers", value: String(needCovers)),
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "offset", value: String(offset))
         ]
@@ -151,8 +182,7 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        let wrapper: VKResponse<PhotosGetAlbumsResponse> = try await network.request(VKResponse<PhotosGetAlbumsResponse>.self, from: request)
-        return wrapper.response
+        return try await requestVK(PhotosGetAlbumsResponse.self, from: request)
     }
 
     // MARK: - photos.get
@@ -186,18 +216,20 @@ final class VKApiService: Sendable {
 
     // MARK: - friends.get
 
-    /// Список друзей (userId = nil — текущий).
+    /// Список друзей (userId = nil — текущий). extended=1 — полные объекты с полями.
     func getFriends(
         token: String,
         userId: Int? = nil,
         count: Int = 50,
         offset: Int = 0,
+        extended: Int = 1,
         fields: String = "photo_50"
     ) async throws -> FriendsGetResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "extended", value: String(extended)),
             URLQueryItem(name: "order", value: "name"),
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "offset", value: String(offset)),
@@ -209,8 +241,7 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        let wrapper: VKResponse<FriendsGetResponse> = try await network.request(VKResponse<FriendsGetResponse>.self, from: request)
-        return wrapper.response
+        return try await requestVK(FriendsGetResponse.self, from: request)
     }
 
     // MARK: - groups.get
@@ -236,7 +267,6 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        let wrapper: VKResponse<GroupsGetResponse> = try await network.request(VKResponse<GroupsGetResponse>.self, from: request)
-        return wrapper.response
+        return try await requestVK(GroupsGetResponse.self, from: request)
     }
 }
