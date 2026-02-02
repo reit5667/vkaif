@@ -5,34 +5,90 @@ struct ContentView: View {
     @StateObject private var authService = AuthService()
     @State private var showAuthView = false
     @State private var feedLoadState: FeedLoadState = .idle
+    @State private var feedPosts: [VKPost] = []
+    @State private var feedProfiles: [VKProfile] = []
+    @State private var feedGroups: [VKGroup] = []
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                Text("CleanFeedVK")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                Divider()
-
-                // Статус авторизации
-                statusSection
-
-                // Кнопки действий
-                actionButtons
-
-                // Результат загрузки ленты
-                feedResultView
+            Group {
+                if !feedPosts.isEmpty {
+                    feedListView
+                } else {
+                    mainContentStack
+                }
             }
-            .padding()
             .navigationTitle("Главная")
             .sheet(isPresented: $showAuthView) {
                 AuthView(authService: authService)
             }
         }
+    }
+
+    // MARK: - Лента постов (LazyVStack)
+
+    private var feedListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(feedPosts, id: \.postId) { post in
+                    PostCellView(
+                        post: post,
+                        authorName: authorName(for: post),
+                        authorAvatarURL: authorAvatarURL(for: post),
+                        relativeDate: relativeDateString(from: post.date)
+                    )
+                    .padding(.vertical, 8)
+                    Divider()
+                }
+            }
+            .padding(.horizontal)
+        }
+        .overlay(alignment: .top) {
+            if feedLoadState.isLoading {
+                ProgressView("Загрузка…")
+                    .padding(8)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(8)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Обновить") { loadFeed() }
+                    .disabled(feedLoadState.isLoading)
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Выйти") {
+                    authService.logout()
+                    feedPosts = []
+                    feedProfiles = []
+                    feedGroups = []
+                }
+            }
+        }
+    }
+
+    private var mainContentStack: some View {
+        VStack(spacing: 20) {
+            Text("CleanFeedVK")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+            Divider()
+            statusSection
+            actionButtons
+            feedResultView
+        }
+        .padding()
+    }
+
+    private func authorName(for post: VKPost) -> String {
+        authorName(for: post, profiles: feedProfiles, groups: feedGroups)
+    }
+
+    private func authorAvatarURL(for post: VKPost) -> String? {
+        authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
     }
 
     // MARK: - Views
@@ -132,9 +188,11 @@ struct ContentView: View {
                     print("[CleanFeedVK] Фильтр: было \(response.items.count), осталось \(filtered.count)")
                 }
                 await MainActor.run {
+                    feedPosts = filtered
+                    feedProfiles = response.profiles ?? []
+                    feedGroups = response.groups ?? []
                     feedLoadState = .loaded(count: filtered.count)
                 }
-                // Вывод в консоль (уже отфильтрованная лента)
                 printFeedToConsole(posts: filtered, nextFrom: response.nextFrom)
             } catch {
                 await MainActor.run {

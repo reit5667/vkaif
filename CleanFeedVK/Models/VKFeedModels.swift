@@ -30,6 +30,9 @@ struct VKPost: Decodable {
     let fromId: Int?
     let ownerId: Int?
     let date: Date
+
+    /// Уникальный ключ поста для списков (owner_id + id).
+    var postId: String { "\(ownerId ?? fromId ?? 0)_\(id)" }
     let text: String
     let markedAsAds: Int?
     let postType: String?
