@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Фото альбома (photos.get): сетка, тап — полноэкран.
+/// Фото альбома (photos.get): сетка, тап — полноэкран; подгрузка +50 при достижении низа; сортировка по дате.
 struct AlbumPhotosView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var authService: AuthService
@@ -9,12 +9,22 @@ struct AlbumPhotosView: View {
     let albumTitle: String
 
     @State private var photos: [VKPhoto] = []
+    @State private var totalCount: Int = 0
     @State private var loadState: AlbumPhotosLoadState = .idle
+    @State private var loadMoreState: AlbumPhotosLoadState = .idle
     @State private var fullScreenInitialIndex: Int = 0
     @State private var isFullScreenPresented = false
+    /// true = сначала новые (rev=1), false = сначала старые (rev=0).
+    @State private var sortNewestFirst = true
 
     private let vkApi = VKApiService()
+    private let pageSize = 50
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
+
+    private var rev: Int { sortNewestFirst ? 1 : 0 }
+    private var canLoadMore: Bool {
+        loadState == .loaded && loadMoreState != .loading && photos.count < totalCount
+    }
 
     var body: some View {
         Group {
@@ -28,8 +38,16 @@ struct AlbumPhotosView: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 4) {
-                            ForEach(Array(photos.enumerated()), id: \.element.id) { _, photo in
+                            ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
                                 photoCell(photo)
+                                    .onAppear {
+                                        if index == photos.count - 1 { loadMoreIfNeeded() }
+                                    }
+                            }
+                            if loadMoreState == .loading {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
                             }
                         }
                         .padding(4)
@@ -45,6 +63,24 @@ struct AlbumPhotosView: View {
         }
         .navigationTitle(albumTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        if sortNewestFirst { sortNewestFirst = false; reloadWithNewSort() }
+                    } label: {
+                        Label("Сначала старые", systemImage: sortNewestFirst ? "circle" : "checkmark.circle.fill")
+                    }
+                    Button {
+                        if !sortNewestFirst { sortNewestFirst = true; reloadWithNewSort() }
+                    } label: {
+                        Label("Сначала новые", systemImage: !sortNewestFirst ? "circle" : "checkmark.circle.fill")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
         .fullScreenCover(isPresented: $isFullScreenPresented) {
             let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
             if !urls.isEmpty {
@@ -55,7 +91,7 @@ struct AlbumPhotosView: View {
                 )
             }
         }
-        .onAppear { loadPhotos() }
+        .onAppear { loadPhotos(offset: 0, append: false) }
     }
 
     private func photoCell(_ photo: VKPhoto) -> some View {
@@ -93,26 +129,68 @@ struct AlbumPhotosView: View {
         }
     }
 
-    private func loadPhotos() {
+    private func loadPhotos(offset: Int, append: Bool) {
         guard let token = authService.accessToken else { return }
-        loadState = .loading
+        if append {
+            loadMoreState = .loading
+        } else {
+            loadState = .loading
+        }
         Task {
             do {
-                let response = try await vkApi.getPhotos(token: token, ownerId: ownerId, albumId: albumId)
+                let response = try await vkApi.getPhotos(
+                    token: token,
+                    ownerId: ownerId,
+                    albumId: albumId,
+                    count: pageSize,
+                    offset: offset,
+                    rev: rev
+                )
                 await MainActor.run {
-                    photos = response.items
-                    loadState = .loaded
+                    if append {
+                        photos.append(contentsOf: response.items)
+                        loadMoreState = .idle
+                    } else {
+                        photos = response.items
+                        totalCount = response.count
+                        loadState = .loaded
+                    }
                 }
             } catch {
-                await MainActor.run { loadState = .failed(error) }
+                await MainActor.run {
+                    if append { loadMoreState = .failed(error) }
+                    else { loadState = .failed(error) }
+                }
             }
         }
     }
+
+    private func loadMoreIfNeeded() {
+        guard canLoadMore else { return }
+        loadPhotos(offset: photos.count, append: true)
+    }
+
+    private func reloadWithNewSort() {
+        photos = []
+        totalCount = 0
+        loadPhotos(offset: 0, append: false)
+    }
 }
 
-enum AlbumPhotosLoadState {
+enum AlbumPhotosLoadState: Equatable {
     case idle
     case loading
     case loaded
     case failed(Error)
+
+    static func == (lhs: AlbumPhotosLoadState, rhs: AlbumPhotosLoadState) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.loading, .loading), (.loaded, .loaded):
+            return true
+        case (.failed, .failed):
+            return true
+        default:
+            return false
+        }
+    }
 }

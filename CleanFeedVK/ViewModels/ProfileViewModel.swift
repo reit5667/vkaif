@@ -23,9 +23,7 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var friendsLoadState: ProfileTabLoadState = .idle
 
     @Published private(set) var groups: [VKGroup] = []
-    @Published private(set) var groupsTotalCount: Int?
     @Published private(set) var groupsLoadState: ProfileTabLoadState = .idle
-    @Published private(set) var groupsLoadMoreLoading = false
 
     @Published private(set) var albums: [VKAlbum] = []
     @Published private(set) var albumsLoadState: ProfileTabLoadState = .idle
@@ -88,13 +86,14 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    /// Загрузка всех друзей одним запросом (count=5000 — лимит VK API).
     func loadFriends(forceRefresh: Bool) async {
         if !forceRefresh, case .loading = friendsLoadState { return }
         if !forceRefresh, case .loaded = friendsLoadState { return }
         guard let token = authService.accessToken else { return }
         await MainActor.run { friendsLoadState = .loading }
         do {
-            let response = try await vkApi.getFriends(token: token, userId: userId)
+            let response = try await vkApi.getFriends(token: token, userId: userId, count: 5000, offset: 0)
             await MainActor.run {
                 friends = response.items
                 friendsLoadState = .loaded
@@ -104,39 +103,28 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    private let groupsPageSize = 20
-
+    /// Загрузка всех групп: цикл по offset до пустого ответа (VK при extended=1 часто отдаёт по 20–22 за раз; response.count не надёжен).
     func loadGroups(forceRefresh: Bool) async {
         if !forceRefresh, case .loading = groupsLoadState { return }
         if !forceRefresh, case .loaded = groupsLoadState { return }
         guard let token = authService.accessToken else { return }
         await MainActor.run { groupsLoadState = .loading }
         do {
-            let response = try await vkApi.getGroups(token: token, count: groupsPageSize, offset: 0)
+            var allItems: [VKGroup] = []
+            var offset = 0
+            let pageSize = 1000
+            while true {
+                let response = try await vkApi.getGroups(token: token, count: pageSize, offset: offset)
+                allItems.append(contentsOf: response.items)
+                if response.items.isEmpty { break }
+                offset = allItems.count
+            }
             await MainActor.run {
-                groups = response.items
-                groupsTotalCount = response.count
+                groups = allItems
                 groupsLoadState = .loaded
             }
         } catch {
             await MainActor.run { groupsLoadState = .failed(error) }
-        }
-    }
-
-    /// Подгрузка следующих групп при достижении низа списка (по 20).
-    func loadMoreGroups() async {
-        guard let total = groupsTotalCount, groups.count < total else { return }
-        guard !groupsLoadMoreLoading else { return }
-        guard let token = authService.accessToken else { return }
-        await MainActor.run { groupsLoadMoreLoading = true }
-        do {
-            let response = try await vkApi.getGroups(token: token, count: groupsPageSize, offset: groups.count)
-            await MainActor.run {
-                groups.append(contentsOf: response.items)
-                groupsLoadMoreLoading = false
-            }
-        } catch {
-            await MainActor.run { groupsLoadMoreLoading = false }
         }
     }
 

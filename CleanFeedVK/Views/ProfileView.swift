@@ -126,12 +126,9 @@ struct ProfileView: View {
         case .groups:
             ProfileGroupsTabView(
                 groups: viewModel.groups,
-                groupsTotalCount: viewModel.groupsTotalCount,
                 loadState: viewModel.groupsLoadState,
-                loadMoreLoading: viewModel.groupsLoadMoreLoading,
                 authService: authService,
-                onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
-                onLoadMore: { await viewModel.loadMoreGroups() }
+                onRefresh: { await viewModel.loadGroups(forceRefresh: true) }
             )
         }
     }

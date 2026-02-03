@@ -193,13 +193,14 @@ final class VKApiService: Sendable {
 
     // MARK: - photos.get
 
-    /// Фото альбома. album_id: числовой или -15 для «Сохранённые».
+    /// Фото альбома. album_id: числовой или -15 для «Сохранённые». rev: 1 = сначала новые, 0 = сначала старые.
     func getPhotos(
         token: String,
         ownerId: Int,
         albumId: Int,
         count: Int = 50,
-        offset: Int = 0
+        offset: Int = 0,
+        rev: Int = 1
     ) async throws -> PhotosGetResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -209,6 +210,7 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "album_id", value: String(albumId)),
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "rev", value: String(rev)),
             URLQueryItem(name: "extended", value: "0")
         ]
         guard var components = URLComponents(string: "\(baseURL)/photos.get") else { throw VKApiError.invalidURL }
@@ -255,10 +257,10 @@ final class VKApiService: Sendable {
 
     // MARK: - groups.get
 
-    /// Группы текущего пользователя.
+    /// Сообщества текущего пользователя (все типы: группы, паблики, мероприятия). Без filter — все подписки, как в друзьях.
     func getGroups(
         token: String,
-        count: Int = 50,
+        count: Int = 1000,
         offset: Int = 0,
         extended: Int = 1
     ) async throws -> GroupsGetResponse {
@@ -267,7 +269,6 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "extended", value: String(extended)),
-            URLQueryItem(name: "filter", value: "groups"),
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "offset", value: String(offset))
         ]

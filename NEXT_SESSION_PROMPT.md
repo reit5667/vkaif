@@ -1,62 +1,53 @@
 # Промпт для следующей сессии
 
-Проект: **CleanFeedVK** (iOS 17+, Swift 6, SwiftUI, MVVM). Спека и дорожная карта — **PROJECT_STATUS.md** в корне.
+Проект: **CleanFeedVK** (iOS 17+, Swift 6, SwiftUI, MVVM). Полная спека и дорожная карта — **PROJECT_STATUS.md** в корне.
 
 ---
 
-## Что сделано в прошлом диалоге
+## Что сделано в этом диалоге
 
-### Лайки
-- **VKApiService:** `likes.add`, `likes.delete` (type=post/comment). Ответ VK: число или `{"likes": N}` — декодирование через `VKLikesAddResponse`.
-- **Модели:** `VKPostLikes.userLikes`, `VKCommentLikes.userLikes` (0/1).
-- **Пост:** PostCellView — `likesCountOverride`, `isLikedOverride`, `onLike`, `likeInProgress`; кнопка лайка (toggle). ContentView/GroupWallView: `likeToggle(post)`, `postLikeOverrides`, `postLikedOverrides`.
-- **Комментарий:** PostCommentsView — toggle лайка комментария (likes.add / likes.delete), `commentLikeOverrides`, `commentLikedOverrides`.
+### Успешно
+- **Вкладки профиля:** List вынесен из ScrollView — списки Друзья/Группы/Фото отображаются (раньше были пустые).
+- **Друзья:** загрузка одним запросом `getFriends(count: 5000, offset: 0)`.
+- **Группы:** убран `filter=groups` — подгружаются все типы сообществ; цикл по offset до пустого ответа.
+- **Фото профиля:** вкладка Фото — добавлен альбом «Фото профиля» (album_id=-6).
+- **Комментарии:** кнопка «Подгрузить ещё» только если всего комментариев >5.
+- **Fullscreen фото:** кнопки «Нравится» и «Комментарии» активны (лайк поста, открытие комментариев); стрелки влево/вправо для перелистывания (почти прозрачные).
+- **Качество превью в ленте:** добавлен `VKPhoto.feedPreviewURL` (приоритет m,x,y,z,w); в PostCellView для сетки фото используется `feedPreviewURL` вместо `thumbnailDisplayURL` — лучше качество при одной картинке в посте.
+- **Альбомы:** подгрузка +50 при скролле; меню 3 точки — сортировка по дате. **AlbumPhotosLoadState:** Equatable (исправлены ошибки сборки).
+- **PROJECT_STATUS.md** и **NEXT_SESSION_PROMPT.md** обновлены.
 
-### Комментарии
-- Кнопка комментариев на **всех** постах (в т.ч. при 0 комментариев).
-- **«Добавить комментарий»** — корневой (wall.createComment без reply_to); **ответ** — wall.createComment(reply_to_comment: id). Модель ответа: `VKWallCreateCommentResponse` (comment_id).
-- **AddCommentTarget:** .root / .reply(VKComment); один sheet для корня и ответа.
-- Тап по **имени автора** комментария → профиль/группа: programmatic navigation (`authorDestination: CommentAuthorDestination?`, Button вместо NavigationLink(value:)), чтобы не открывался профиль при «Ответить»/«Отправить».
-- **Thread:** VKComment.thread (VKCommentThread: count, items); отображение `thread?.items` под комментарием; getWallComments с `thread_items_count=10`.
-- **«Подгрузить ещё»:** при append и 0 записей с API — `noMoreTopLevel = true`, кнопка скрывается.
-
-### Профиль (попытки починить вкладки — не помогло)
-- **ProfileViewModel:** `loadAlbums(ownerId: Int?, forceRefresh:)` — явный ownerId после loadUserOnce; в loadProfileIfNeeded/refreshAll передаётся `user?.id ?? userId`.
-- **ContentView:** один `@StateObject profileViewModel` (init создаёт auth + ProfileViewModel(authService: auth, userId: nil)); таб «Профиль» — `ProfileView(authService: authService, viewModel: profileViewModel)`.
-- **ProfileView:** только `init(authService: AuthService, viewModel: ProfileViewModel)`; `@ObservedObject var viewModel` (обязательный), чтобы SwiftUI подписывался на @Published.
-- **ProfileViewWrapper(authService: AuthService, userId: Int?):** для профиля друга — внутри `@StateObject viewModel = ProfileViewModel(authService, userId:)`, рендер `ProfileView(authService, viewModel: viewModel)`. Вызовы: лента → пользователь, друзья → друг, комментарии → автор — везде ProfileViewWrapper(authService, userId: id).
-- **ProfileView:** `tabContentId` (.id на контенте вкладки), `loadTabIfNeeded` при onChange(selectedTab).
-- **Итог:** API возвращает friends (50), groups (22); в UI списки по-прежнему пустые. Причина не найдена.
+### В бэклоге (низкий приоритет)
+- **Превью фото:** часть не грузится в сетке (fullscreen ок); разбор sizes/fallback.
+- **«Добавить в альбом» (fullscreen):** заглушка; нужен photos.copy или аналог.
+- **Видео в ленте:** превью/плейер (video.get).
+- Пагинация друзей/сообществ на странице профиля при скролле.
 
 ---
 
 ## Текущее состояние (кратко)
 
-- **Лента:** auth, newsfeed.get, фильтр, подгрузка, ячейка (заголовок → группа/профиль, текст, фото 1–10, лайк toggle, комментарии). Фото → fullscreen. Тап по автору → GroupWallView / ProfileViewWrapper(userId).
-- **Профиль:** users.get, аватар, имя, статус. Вкладки Фото/Друзья/Группы — данные приходят (логи `friends.get ok count=54 items=50`, `groups.get ok`), **UI пустой** (бэклог).
-- **Комментарии:** счётчик, тап → PostCommentsView; «Добавить комментарий», ответ, автор → профиль, лайк комментария, thread, «Подгрузить ещё» при 0.
-- **Лайки:** пост и комментарий — ставить/убирать (likes.add / likes.delete).
+- **Лента:** newsfeed.get, фильтр, подгрузка, ячейка (фото через feedPreviewURL), лайк, комментарии, fullscreen галерея. Тап по автору → GroupWallView / ProfileViewWrapper(userId).
+- **Профиль:** users.get, аватар, имя, статус. Вкладки Фото (альбомы + Сохранённые + Фото профиля), Друзья (count=5000), Группы (цикл offset). List вне ScrollView.
+- **Комментарии:** первые 5, «Подгрузить ещё» только если >5; добавление/ответ, автор → профиль, лайк, thread.
+- **Fullscreen:** закрытие слева, тап → панель (счётчики + активные «Нравится»/«Комментарии»), меню 3 точки, стрелки перелистывания влево/вправо, свайп вниз.
 
 ---
 
-## Задача для следующей сессии
+## Задачи для следующей сессии
 
-**Приоритет:** разобраться, почему вкладки профиля (Друзья, Группы, Фото) пустые при том что API возвращает данные.
+**По приоритету (бэклог):**
+- Превью фото в сетке не подгружаются — разбор sizes/fallback.
+- «Добавить в альбом» (fullscreen): photos.copy или аналог.
+- Видео в ленте: превью/плейер (video.get).
 
-**Идеи для проверки:**
-1. Убедиться, что `body` табов (ProfileFriendsTabView, ProfileGroupsTabView, ProfilePhotoTabView) вызывается с непустыми массивами — добавить временный вывод (например, Text("\(viewModel.friends.count)")) или брейкпоинт.
-2. Проверить иерархию: Picker + ScrollView + tabContent — возможно, контент вкладки не перерисовывается при изменении viewModel (например, из-за кэширования или идентичности view).
-3. Альтернатива: загружать данные вкладки не в loadProfileIfNeeded, а при первом появлении самой вкладки (например, .onAppear у контента выбранной вкладки или по selectedTab).
-4. Рассмотреть отказ от Picker в пользу отдельных кнопок/сегментов или другого способа переключения вкладок с явной привязкой к данным.
-
-**Дальше по плану:** пагинация друзей (offset), видео в ленте, дорожная карта (друзья, альбомы, группы, сообщения).
+**Дальше:** сообщения (messages.get), при желании — пагинация друзей/групп на профиле при скролле.
 
 ---
 
 ## Технические детали
 
-- **ProfileView:** только `init(authService: AuthService, viewModel: ProfileViewModel)`. userId берётся из `viewModel.userId`.
-- **ProfileViewWrapper:** `init(authService: AuthService, userId: Int?)`, внутри `@StateObject viewModel = ProfileViewModel(authService: authService, userId: userId)`.
-- **Таб «Профиль» в ContentView:** `ProfileView(authService: authService, viewModel: profileViewModel)`; `profileViewModel` — один на приложение.
-- **PostCommentsView:** CommentAuthorDestination (user/group), authorDestination: CommentAuthorDestination?, navigationDestination(item: $authorDestination); AddCommentTarget (.root / .reply); VKComment.thread.
-- **VKApiService:** likes.add, likes.delete (VKLikesAddResponse); wall.createComment (VKWallCreateCommentResponse); getWallComments(threadItemsCount: 10).
+- **ProfileViewModel:** `loadGroups` — getGroups без filter, цикл по offset до `response.items.isEmpty`.
+- **FullScreenPhotoGalleryView:** параметры `isLiked`, `onLike`, `onTapComments`; локальный `likedOverride`; стрелки chevron.left/right (opacity 0.25) для перелистывания.
+- **PostCellView:** в галерею передаётся `onTapComments: { fullScreenPhotoIndex = nil; onTapComments?() }`.
+- **AlbumPhotosView:** пагинация +50, toolbar — сортировка по дате (rev).

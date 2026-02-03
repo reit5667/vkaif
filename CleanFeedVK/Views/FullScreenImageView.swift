@@ -54,15 +54,46 @@ struct FullScreenPhotoGalleryView: View {
     let urls: [URL]
     let initialIndex: Int
     let onDismiss: () -> Void
+    /// Счётчики для отображения на панели (из поста); nil — не показывать число.
+    var likesCount: Int? = nil
+    var commentsCount: Int? = nil
+    /// Лайк и комментарии: при вызове из поста — те же действия, что под постом.
+    var isLiked: Bool = false
+    var onLike: (() -> Void)? = nil
+    var onTapComments: (() -> Void)? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
+    /// Локальное переопределение после тапа «Нравится» до закрытия галереи.
+    @State private var likedOverride: Bool? = nil
 
-    init(urls: [URL], initialIndex: Int, onDismiss: @escaping () -> Void) {
+    init(
+        urls: [URL],
+        initialIndex: Int,
+        onDismiss: @escaping () -> Void,
+        likesCount: Int? = nil,
+        commentsCount: Int? = nil,
+        isLiked: Bool = false,
+        onLike: (() -> Void)? = nil,
+        onTapComments: (() -> Void)? = nil
+    ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
         self.onDismiss = onDismiss
+        self.likesCount = likesCount
+        self.commentsCount = commentsCount
+        self.isLiked = isLiked
+        self.onLike = onLike
+        self.onTapComments = onTapComments
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
+    }
+
+    private var displayLiked: Bool { likedOverride ?? isLiked }
+    private var displayLikesCount: Int {
+        guard let n = likesCount else { return 0 }
+        if likedOverride == true, !isLiked { return n + 1 }
+        if likedOverride == false, isLiked { return max(0, n - 1) }
+        return n
     }
 
     private let swipeThreshold: CGFloat = 120
@@ -86,8 +117,8 @@ struct FullScreenPhotoGalleryView: View {
                         .tag(index)
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .automatic))
-                .indexViewStyle(.page(backgroundDisplayMode: .automatic))
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .indexViewStyle(.page(backgroundDisplayMode: .never))
                 .gesture(
                     DragGesture()
                         .onEnded { value in
@@ -106,6 +137,48 @@ struct FullScreenPhotoGalleryView: View {
                         bottomBar
                     }
                     .transition(.opacity)
+                    .padding(.bottom, 60)
+                }
+
+                // Стрелки влево/вправо — почти прозрачные, перелистывание
+                if urls.count > 1 {
+                    HStack {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                currentIndex = max(0, currentIndex - 1)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundStyle(.white.opacity(0.25))
+                                .frame(width: 56, height: 120)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(currentIndex > 0 ? 1 : 0.3)
+                        .disabled(currentIndex <= 0)
+                        .padding(.leading, 4)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                currentIndex = min(urls.count - 1, currentIndex + 1)
+                            }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundStyle(.white.opacity(0.25))
+                                .frame(width: 56, height: 120)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(currentIndex < urls.count - 1 ? 1 : 0.3)
+                        .disabled(currentIndex >= urls.count - 1)
+                        .padding(.trailing, 4)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
                 }
             }
         }
@@ -114,6 +187,16 @@ struct FullScreenPhotoGalleryView: View {
 
     private var topBar: some View {
         HStack {
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "chevron.down.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .padding(.leading, 16)
+            .padding(.top, 8)
             Spacer(minLength: 0)
             Menu {
                 Button {
@@ -130,14 +213,6 @@ struct FullScreenPhotoGalleryView: View {
                     .foregroundStyle(.white)
                     .symbolRenderingMode(.hierarchical)
             }
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "chevron.down.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
-            }
             .padding(.trailing, 16)
             .padding(.top, 8)
         }
@@ -146,28 +221,59 @@ struct FullScreenPhotoGalleryView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 32) {
-            Button {
-                // TODO: лайк фото (likes.add для photo)
-            } label: {
-                Label("Нравится", systemImage: "heart")
-                    .font(.body)
-                    .foregroundStyle(.white)
+            if let action = onLike {
+                Button {
+                    likedOverride = !displayLiked
+                    action()
+                } label: {
+                    Label(
+                        "Нравится (\(displayLikesCount))",
+                        systemImage: displayLiked ? "heart.fill" : "heart"
+                    )
+                }
+                .font(.body)
+                .foregroundStyle(displayLiked ? .red : .white)
+                .buttonStyle(.plain)
+            } else {
+                Group {
+                    if let n = likesCount {
+                        Label("Нравится (\(n))", systemImage: "heart")
+                    } else {
+                        Label("Нравится", systemImage: "heart")
+                    }
+                }
+                .font(.body)
+                .foregroundStyle(.white)
             }
-            .buttonStyle(.plain)
 
-            Button {
-                // TODO: комментарии к фото
-            } label: {
-                Label("Комментарии", systemImage: "bubble.right")
-                    .font(.body)
-                    .foregroundStyle(.white)
+            if let action = onTapComments {
+                Button(action: action) {
+                    if let n = commentsCount {
+                        Label("Комментарии (\(n))", systemImage: "bubble.right")
+                    } else {
+                        Label("Комментарии", systemImage: "bubble.right")
+                    }
+                }
+                .font(.body)
+                .foregroundStyle(.white)
+                .buttonStyle(.plain)
+            } else {
+                Group {
+                    if let n = commentsCount {
+                        Label("Комментарии (\(n))", systemImage: "bubble.right")
+                    } else {
+                        Label("Комментарии", systemImage: "bubble.right")
+                    }
+                }
+                .font(.body)
+                .foregroundStyle(.white)
             }
-            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
+        .padding(.bottom, 24)
         .background(Color.black.opacity(0.5))
     }
 }

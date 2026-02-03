@@ -163,17 +163,9 @@ struct ProfileFriendsTabView: View {
 
 struct ProfileGroupsTabView: View {
     let groups: [VKGroup]
-    let groupsTotalCount: Int?
     let loadState: ProfileTabLoadState
-    let loadMoreLoading: Bool
     @ObservedObject var authService: AuthService
     var onRefresh: () async -> Void
-    var onLoadMore: () async -> Void
-
-    private var canLoadMore: Bool {
-        guard let total = groupsTotalCount else { return false }
-        return groups.count < total
-    }
 
     var body: some View {
         Group {
@@ -185,31 +177,11 @@ struct ProfileGroupsTabView: View {
                 if groups.isEmpty {
                     ContentUnavailableView("Нет групп", systemImage: "person.3")
                 } else {
-                    List {
-                        ForEach(groups, id: \.id) { group in
-                            HStack(spacing: 12) {
-                                groupAvatar(group)
-                                Text(group.name ?? "Группа \(group.id)")
-                                    .font(.body)
-                            }
-                        }
-                        if canLoadMore {
-                            Group {
-                                if loadMoreLoading {
-                                    HStack {
-                                        Spacer()
-                                        ProgressView()
-                                        Spacer()
-                                    }
-                                } else {
-                                    Button("Подгрузить ещё") { Task { await onLoadMore() } }
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
-                            .onAppear {
-                                if !loadMoreLoading { Task { await onLoadMore() } }
-                            }
+                    List(groups, id: \.id) { group in
+                        HStack(spacing: 12) {
+                            groupAvatar(group)
+                            Text(group.name ?? "Группа \(group.id)")
+                                .font(.body)
                         }
                     }
                     .listStyle(.insetGrouped)

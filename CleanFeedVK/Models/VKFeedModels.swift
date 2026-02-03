@@ -294,10 +294,22 @@ struct VKPhoto: Decodable {
         return sizes.first?.url
     }
 
-    /// URL для превью (сетка/лента): приоритет мелких размеров — чаще отдаются и грузятся надёжнее.
+    /// URL для превью (сетка/лента): приоритет мелких размеров — альбомы, много фото в посте.
     var thumbnailDisplayURL: String? {
         guard let sizes = sizes, !sizes.isEmpty else { return nil }
         let order = ["s", "m", "q", "p", "x", "o", "r", "y", "z", "w"]
+        for type in order {
+            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
+                return url
+            }
+        }
+        return sizes.first?.url
+    }
+
+    /// URL для превью в ленте: приоритет средних размеров (m,x,y,z,w) — приемлемое качество при одной картинке в посте.
+    var feedPreviewURL: String? {
+        guard let sizes = sizes, !sizes.isEmpty else { return nil }
+        let order = ["m", "x", "y", "z", "w", "r", "q", "p", "s", "o"]
         for type in order {
             if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
                 return url

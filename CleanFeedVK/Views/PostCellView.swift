@@ -27,10 +27,10 @@ struct PostCellView: View {
     @State private var fullScreenPhotoIndex: Int? = nil
     private let textLineLimitCollapsed = 3
 
-    /// URL фото для превью в сетке (приоритет мелких размеров).
+    /// URL фото для превью в сетке ленты (приоритет средних размеров m,x — нормальное качество при одной картинке).
     private var photoThumbnailURLs: [String] {
         guard let attachments = post.attachments else { return [] }
-        return attachments.compactMap { p in p.photo?.thumbnailDisplayURL ?? p.photo?.displayURL }
+        return attachments.compactMap { p in p.photo?.feedPreviewURL ?? p.photo?.displayURL }
     }
 
     /// URL фото для полноэкранного просмотра (крупные размеры).
@@ -68,7 +68,14 @@ struct PostCellView: View {
                 FullScreenPhotoGalleryView(
                     urls: photoDisplayURLsAsURLs,
                     initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
-                    onDismiss: { fullScreenPhotoIndex = nil }
+                    onDismiss: { fullScreenPhotoIndex = nil },
+                    likesCount: displayLikesCount,
+                    commentsCount: post.commentsCount,
+                    isLiked: displayIsLiked,
+                    onLike: likeInProgress ? nil : onLike,
+                    onTapComments: onTapComments.map { tapComments in
+                        { fullScreenPhotoIndex = nil; tapComments() }
+                    }
                 )
             }
         }
