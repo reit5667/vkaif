@@ -8,8 +8,16 @@ enum FeedDestination: Hashable {
 
 struct ContentView: View {
 
-    @StateObject private var authService = AuthService()
+    @StateObject private var authService: AuthService
+    /// Один ViewModel для таба «Профиль» — не пересоздаётся при переключении табов, данные друзей/групп/альбомов сохраняются.
+    @StateObject private var profileViewModel: ProfileViewModel
     @State private var showAuthView = false
+
+    init() {
+        let auth = AuthService()
+        _authService = StateObject(wrappedValue: auth)
+        _profileViewModel = StateObject(wrappedValue: ProfileViewModel(authService: auth, userId: nil))
+    }
     @State private var feedLoadState: FeedLoadState = .idle
     @State private var feedPosts: [VKPost] = []
     @State private var feedProfiles: [VKProfile] = []
@@ -17,6 +25,11 @@ struct ContentView: View {
     @State private var nextFrom: String? = nil       // курсор для подгрузки
     @State private var isLoadingMore: Bool = false  // подгрузка в конец
     @State private var commentsContext: PostCommentsContext? = nil
+    /// Переопределения счётчика лайков после likes.add (postId -> новый count).
+    @State private var postLikeOverrides: [String: Int] = [:]
+    /// Переопределения «лайкнуто» после likes.add (postId -> true).
+    @State private var postLikedOverrides: [String: Bool] = [:]
+    @State private var likeInProgress: Set<String> = []  // postId, чтобы не дублировать запросы
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -31,7 +44,7 @@ struct ContentView: View {
                         }
                         .tabItem { Label("Лента", systemImage: "list.bullet.rectangle") }
                         NavigationStack {
-                            ProfileView(authService: authService)
+                            ProfileView(authService: authService, viewModel: profileViewModel)
                         }
                         .tabItem { Label("Профиль", systemImage: "person.circle") }
                     }
@@ -66,6 +79,8 @@ struct ContentView: View {
                     feedProfiles = []
                     feedGroups = []
                     nextFrom = nil
+                    postLikeOverrides = [:]
+                    postLikedOverrides = [:]
                 }
             }
         }
@@ -84,13 +99,17 @@ struct ContentView: View {
                         relativeDate: relativeDateString(from: post.date),
                         authService: authService,
                         feedDestination: feedDestination(for: post),
-                        onTapComments: post.commentsCount > 0 ? {
+                        onTapComments: {
                             commentsContext = PostCommentsContext(
                                 ownerId: post.ownerId ?? post.fromId ?? 0,
                                 postId: post.id,
                                 totalCount: post.commentsCount
                             )
-                        } : nil
+                        },
+                        likesCountOverride: postLikeOverrides[post.postId],
+                        isLikedOverride: postLikedOverrides[post.postId],
+                        onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+                        likeInProgress: likeInProgress.contains(post.postId)
                     )
                     .padding(.vertical, 8)
                     Divider()
@@ -116,7 +135,7 @@ struct ContentView: View {
             case .group(let id):
                 GroupWallView(authService: authService, groupId: id)
             case .user(let id):
-                ProfileView(authService: authService, userId: id)
+                ProfileViewWrapper(authService: authService, userId: id)
             }
         }
         .sheet(item: $commentsContext) { ctx in
@@ -315,6 +334,49 @@ struct ContentView: View {
         let existingIds = Set(feedGroups.map(\.id))
         let toAdd = new.filter { !existingIds.contains($0.id) }
         if !toAdd.isEmpty { feedGroups.append(contentsOf: toAdd) }
+    }
+
+    /// Toggle лайка поста: если уже лайкнут — likes.delete, иначе likes.add.
+    private func likeToggle(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let pid = post.postId
+        if likeInProgress.contains(pid) { return }
+        let isLiked = postLikedOverrides[pid] ?? (post.likes?.userLikes == 1)
+        likeInProgress.insert(pid)
+        Task {
+            do {
+                let newCount: Int
+                if isLiked {
+                    newCount = try await vkApi.likesDelete(
+                        token: token,
+                        type: "post",
+                        ownerId: ownerId,
+                        itemId: post.id
+                    )
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = false
+                        likeInProgress.remove(pid)
+                    }
+                } else {
+                    newCount = try await vkApi.likesAdd(
+                        token: token,
+                        type: "post",
+                        ownerId: ownerId,
+                        itemId: post.id
+                    )
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = true
+                        likeInProgress.remove(pid)
+                    }
+                }
+            } catch {
+                await MainActor.run { likeInProgress.remove(pid) }
+            }
+        }
     }
 
     private func printFeedToConsole(posts: [VKPost], nextFrom: String?) {

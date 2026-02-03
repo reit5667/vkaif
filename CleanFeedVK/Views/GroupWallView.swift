@@ -10,6 +10,9 @@ struct GroupWallView: View {
     @State private var posts: [VKPost] = []
     @State private var loadState: GroupWallLoadState = .idle
     @State private var commentsContext: PostCommentsContext? = nil
+    @State private var postLikeOverrides: [String: Int] = [:]
+    @State private var postLikedOverrides: [String: Bool] = [:]
+    @State private var likeInProgress: Set<String> = []
 
     private let vkApi = VKApiService()
     private var ownerId: Int { -groupId }
@@ -41,13 +44,17 @@ struct GroupWallView: View {
                                 relativeDate: relativeDateString(from: post.date),
                                 authService: nil,
                                 feedDestination: nil,
-                                onTapComments: post.commentsCount > 0 ? {
+                                onTapComments: {
                                     commentsContext = PostCommentsContext(
                                         ownerId: post.ownerId ?? ownerId,
                                         postId: post.id,
                                         totalCount: post.commentsCount
                                     )
-                                } : nil
+                                },
+                                likesCountOverride: postLikeOverrides[post.postId],
+                                isLikedOverride: postLikedOverrides[post.postId],
+                                onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+                                likeInProgress: likeInProgress.contains(post.postId)
                             )
                             .padding(.vertical, 8)
                             Divider()
@@ -124,6 +131,47 @@ struct GroupWallView: View {
                 }
             } catch {
                 await MainActor.run { loadState = .failed(error) }
+            }
+        }
+    }
+
+    private func likeToggle(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? self.ownerId
+        let pid = post.postId
+        if likeInProgress.contains(pid) { return }
+        let isLiked = postLikedOverrides[pid] ?? (post.likes?.userLikes == 1)
+        likeInProgress.insert(pid)
+        Task {
+            do {
+                let newCount: Int
+                if isLiked {
+                    newCount = try await vkApi.likesDelete(
+                        token: token,
+                        type: "post",
+                        ownerId: ownerId,
+                        itemId: post.id
+                    )
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = false
+                        likeInProgress.remove(pid)
+                    }
+                } else {
+                    newCount = try await vkApi.likesAdd(
+                        token: token,
+                        type: "post",
+                        ownerId: ownerId,
+                        itemId: post.id
+                    )
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = true
+                        likeInProgress.remove(pid)
+                    }
+                }
+            } catch {
+                await MainActor.run { likeInProgress.remove(pid) }
             }
         }
     }

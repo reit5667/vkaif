@@ -21,6 +21,41 @@ struct VKErrorWrapper: Decodable {
     let error: VKErrorPayload
 }
 
+/// Ответ likes.add: VK возвращает response как число (новый count) или как объект {"likes": N}.
+struct VKLikesAddResponse: Decodable {
+    let likesCount: Int
+
+    init(from decoder: Decoder) throws {
+        do {
+            let nested = try decoder.container(keyedBy: InnerKeys.self)
+            likesCount = try nested.decode(Int.self, forKey: .likes)
+            return
+        } catch {
+            let container = try decoder.singleValueContainer()
+            likesCount = try container.decode(Int.self)
+        }
+    }
+
+    private enum InnerKeys: String, CodingKey { case likes }
+}
+
+/// Ответ wall.createComment: VK возвращает объект с comment_id.
+struct VKWallCreateCommentResponse: Decodable {
+    let commentId: Int
+    let parentsStack: [Int]?
+
+    enum CodingKeys: String, CodingKey {
+        case commentId = "comment_id"
+        case parentsStack = "parents_stack"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        commentId = try c.decode(Int.self, forKey: .commentId)
+        parentsStack = try c.decodeIfPresent([Int].self, forKey: .parentsStack)
+    }
+}
+
 // MARK: - newsfeed.get — ответ
 
 struct NewsfeedGetResponse: Decodable {
@@ -60,13 +95,26 @@ struct WallGetCommentsResponse: Decodable {
     }
 }
 
-/// Комментарий к посту (wall.getComments).
+/// Ветка ответов к комментарию (wall.getComments, поле thread).
+struct VKCommentThread: Decodable {
+    let count: Int
+    let items: [VKComment]?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case items
+    }
+}
+
+/// Комментарий к посту (wall.getComments). thread — ответы на комментарий.
 struct VKComment: Decodable {
     let id: Int
     let fromId: Int
     let date: Date
     let text: String
     let likes: VKCommentLikes?
+    /// Ответы на этот комментарий (если есть).
+    let thread: VKCommentThread?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -74,6 +122,7 @@ struct VKComment: Decodable {
         case date
         case text
         case likes
+        case thread
     }
 
     init(from decoder: Decoder) throws {
@@ -84,18 +133,55 @@ struct VKComment: Decodable {
         date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         likes = try c.decodeIfPresent(VKCommentLikes.self, forKey: .likes)
+        thread = try c.decodeIfPresent(VKCommentThread.self, forKey: .thread)
     }
 }
 
+/// Лайки комментария. user_likes == 1 — текущий пользователь лайкнул.
 struct VKCommentLikes: Decodable {
     let count: Int
+    let userLikes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case userLikes = "user_likes"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try c.decode(Int.self, forKey: .count)
+        userLikes = try c.decodeIfPresent(Int.self, forKey: .userLikes)
+    }
+
+    init(count: Int, userLikes: Int? = nil) {
+        self.count = count
+        self.userLikes = userLikes
+    }
 }
 
 // MARK: - Пост (элемент ленты)
 
-/// Лайки поста (newsfeed.get / wall.get).
+/// Лайки поста (newsfeed.get / wall.get). user_likes == 1 — текущий пользователь лайкнул.
 struct VKPostLikes: Decodable {
     let count: Int
+    /// 0 или 1 — поставил ли текущий пользователь лайк.
+    let userLikes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case userLikes = "user_likes"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try c.decode(Int.self, forKey: .count)
+        userLikes = try c.decodeIfPresent(Int.self, forKey: .userLikes)
+    }
+
+    init(count: Int, userLikes: Int? = nil) {
+        self.count = count
+        self.userLikes = userLikes
+    }
 }
 
 /// Комментарии поста (newsfeed.get / wall.get).
@@ -200,6 +286,18 @@ struct VKPhoto: Decodable {
     var displayURL: String? {
         guard let sizes = sizes, !sizes.isEmpty else { return nil }
         let order = ["x", "m", "s", "w", "z", "y", "r", "q", "p", "o"]
+        for type in order {
+            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
+                return url
+            }
+        }
+        return sizes.first?.url
+    }
+
+    /// URL для превью (сетка/лента): приоритет мелких размеров — чаще отдаются и грузятся надёжнее.
+    var thumbnailDisplayURL: String? {
+        guard let sizes = sizes, !sizes.isEmpty else { return nil }
+        let order = ["s", "m", "q", "p", "x", "o", "r", "y", "z", "w"]
         for type in order {
             if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
                 return url

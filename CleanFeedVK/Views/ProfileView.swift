@@ -1,20 +1,19 @@
 import SwiftUI
 
 /// Экран профиля: свой или друга. Composition: Header (users.get) + вкладки загружаются асинхронно и независимо через ProfileViewModel.
+/// viewModel: если передан (таб «Профиль» в ContentView) — один экземпляр на всё приложение; иначе создаётся свой (профиль друга).
 struct ProfileView: View {
 
     @ObservedObject var authService: AuthService
-    /// ID друга для просмотра; nil = свой профиль.
-    var userId: Int? = nil
+    @ObservedObject var viewModel: ProfileViewModel
+    private var userId: Int? { viewModel.userId }
 
-    @StateObject private var viewModel: ProfileViewModel
     @State private var selectedTab: ProfileTab = .photo
     @State private var isAvatarFullScreenPresented = false
 
-    init(authService: AuthService, userId: Int? = nil) {
+    init(authService: AuthService, viewModel: ProfileViewModel) {
         self.authService = authService
-        self.userId = userId
-        _viewModel = StateObject(wrappedValue: ProfileViewModel(authService: authService, userId: userId))
+        self.viewModel = viewModel
     }
 
     private enum ProfileTab: String, CaseIterable {
@@ -66,23 +65,28 @@ struct ProfileView: View {
         .onAppear { viewModel.loadProfileIfNeeded() }
     }
 
+    /// Header + Picker сверху; контент вкладки (List) — отдельно с .frame(maxHeight: .infinity).
+    /// List внутри ScrollView в SwiftUI даёт нулевую/схлопнутую высоту — контент не отображался.
     private func profileContent(user: VKUserDetail) -> some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                avatarSection(user: user)
-                nameSection(user: user)
-                if let status = user.status, !status.isEmpty {
-                    statusSection(status: status)
-                }
-                Picker("", selection: $selectedTab) {
-                    ForEach(availableTabs, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                tabContent(user: user)
+        VStack(spacing: 20) {
+            avatarSection(user: user)
+            nameSection(user: user)
+            if let status = user.status, !status.isEmpty {
+                statusSection(status: status)
             }
-            .padding()
+            Picker("", selection: $selectedTab) {
+                ForEach(availableTabs, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            tabContent(user: user)
+                .id(tabContentId)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding()
+        .onChange(of: selectedTab) { _, newTab in
+            loadTabIfNeeded(tab: newTab, user: user)
         }
         .fullScreenCover(isPresented: $isAvatarFullScreenPresented) {
             if let urlString = user.fullScreenAvatarURL, let url = URL(string: urlString) {
@@ -96,6 +100,11 @@ struct ProfileView: View {
         }
     }
 
+    /// Идентификатор контента вкладки: при изменении данных SwiftUI пересоздаёт view.
+    private var tabContentId: String {
+        "albums-\(viewModel.albums.count)-friends-\(viewModel.friends.count)-groups-\(viewModel.groups.count)"
+    }
+
     @ViewBuilder
     private func tabContent(user: VKUserDetail) -> some View {
         switch selectedTab {
@@ -105,7 +114,7 @@ struct ProfileView: View {
                 loadState: viewModel.albumsLoadState,
                 authService: authService,
                 ownerId: user.id,
-                onRefresh: { await viewModel.loadAlbums(forceRefresh: true) }
+                onRefresh: { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: true) }
             )
         case .friends:
             ProfileFriendsTabView(
@@ -117,10 +126,25 @@ struct ProfileView: View {
         case .groups:
             ProfileGroupsTabView(
                 groups: viewModel.groups,
+                groupsTotalCount: viewModel.groupsTotalCount,
                 loadState: viewModel.groupsLoadState,
+                loadMoreLoading: viewModel.groupsLoadMoreLoading,
                 authService: authService,
-                onRefresh: { await viewModel.loadGroups(forceRefresh: true) }
+                onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
+                onLoadMore: { await viewModel.loadMoreGroups() }
             )
+        }
+    }
+
+    /// Подгрузить данные вкладки при переключении (второй шанс, если при первой загрузке не обновилось).
+    private func loadTabIfNeeded(tab: ProfileTab, user: VKUserDetail) {
+        switch tab {
+        case .photo:
+            Task { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: false) }
+        case .friends:
+            Task { await viewModel.loadFriends(forceRefresh: false) }
+        case .groups:
+            Task { await viewModel.loadGroups(forceRefresh: false) }
         }
     }
 
@@ -186,8 +210,26 @@ enum ProfileLoadState {
     case notAuthenticated
 }
 
+/// Обёртка для профиля друга: создаёт и держит ViewModel (userId != nil). Для «свой профиль» в табе ViewModel передаётся из ContentView.
+struct ProfileViewWrapper: View {
+    @ObservedObject var authService: AuthService
+    let userId: Int?
+
+    @StateObject private var viewModel: ProfileViewModel
+
+    init(authService: AuthService, userId: Int?) {
+        self.authService = authService
+        self.userId = userId
+        _viewModel = StateObject(wrappedValue: ProfileViewModel(authService: authService, userId: userId))
+    }
+
+    var body: some View {
+        ProfileView(authService: authService, viewModel: viewModel)
+    }
+}
+
 #Preview("Свой профиль") {
     NavigationStack {
-        ProfileView(authService: AuthService())
+        ProfileViewWrapper(authService: AuthService(), userId: nil)
     }
 }

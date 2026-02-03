@@ -10,6 +10,8 @@ struct ProfilePhotoTabView: View {
     var onRefresh: () async -> Void
 
     private static let savedAlbumId = -15
+    /// VK: фото профиля (стена).
+    private static let profileAlbumId = -6
 
     var body: some View {
         Group {
@@ -22,6 +24,9 @@ struct ProfilePhotoTabView: View {
                     Section {
                         NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.savedAlbumId, title: "Сохранённые фото")) {
                             Label("Сохранённые фото", systemImage: "square.and.arrow.down.fill")
+                        }
+                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.profileAlbumId, title: "Фото профиля")) {
+                            Label("Фото профиля", systemImage: "person.crop.rectangle.stack")
                         }
                     }
                     Section("Альбомы") {
@@ -129,7 +134,7 @@ struct ProfileFriendsTabView: View {
         }
         .refreshable { await onRefresh() }
         .navigationDestination(for: Int.self) { friendId in
-            ProfileView(authService: authService, userId: friendId)
+            ProfileViewWrapper(authService: authService, userId: friendId)
         }
     }
 
@@ -158,9 +163,17 @@ struct ProfileFriendsTabView: View {
 
 struct ProfileGroupsTabView: View {
     let groups: [VKGroup]
+    let groupsTotalCount: Int?
     let loadState: ProfileTabLoadState
+    let loadMoreLoading: Bool
     @ObservedObject var authService: AuthService
     var onRefresh: () async -> Void
+    var onLoadMore: () async -> Void
+
+    private var canLoadMore: Bool {
+        guard let total = groupsTotalCount else { return false }
+        return groups.count < total
+    }
 
     var body: some View {
         Group {
@@ -172,11 +185,31 @@ struct ProfileGroupsTabView: View {
                 if groups.isEmpty {
                     ContentUnavailableView("Нет групп", systemImage: "person.3")
                 } else {
-                    List(groups, id: \.id) { group in
-                        HStack(spacing: 12) {
-                            groupAvatar(group)
-                            Text(group.name ?? "Группа \(group.id)")
-                                .font(.body)
+                    List {
+                        ForEach(groups, id: \.id) { group in
+                            HStack(spacing: 12) {
+                                groupAvatar(group)
+                                Text(group.name ?? "Группа \(group.id)")
+                                    .font(.body)
+                            }
+                        }
+                        if canLoadMore {
+                            Group {
+                                if loadMoreLoading {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView()
+                                        Spacer()
+                                    }
+                                } else {
+                                    Button("Подгрузить ещё") { Task { await onLoadMore() } }
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
+                            .onAppear {
+                                if !loadMoreLoading { Task { await onLoadMore() } }
+                            }
                         }
                     }
                     .listStyle(.insetGrouped)

@@ -14,18 +14,33 @@ struct PostCellView: View {
     var feedDestination: FeedDestination? = nil
     /// Тап по счётчику комментариев → открыть экран комментариев. nil = не открывать.
     var onTapComments: (() -> Void)? = nil
+    /// Переопределение счётчика лайков (после likes.add). nil = брать из post.
+    var likesCountOverride: Int? = nil
+    /// Переопределение «лайкнуто» (после likes.add). nil = из post.likes?.userLikes.
+    var isLikedOverride: Bool? = nil
+    /// Тап по лайку → поставить лайк. nil = только отображение.
+    var onLike: (() -> Void)? = nil
+    /// true = запрос лайка в процессе, кнопку не нажимать.
+    var likeInProgress: Bool = false
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
     private let textLineLimitCollapsed = 3
 
-    /// URL только фото из вложений (для сетки).
-    private var photoURLs: [String] {
+    /// URL фото для превью в сетке (приоритет мелких размеров).
+    private var photoThumbnailURLs: [String] {
+        guard let attachments = post.attachments else { return [] }
+        return attachments.compactMap { p in p.photo?.thumbnailDisplayURL ?? p.photo?.displayURL }
+    }
+
+    /// URL фото для полноэкранного просмотра (крупные размеры).
+    private var photoDisplayURLs: [String] {
         guard let attachments = post.attachments else { return [] }
         return attachments.compactMap { $0.photo?.displayURL }
     }
 
-    private var photoURLsAsURLs: [URL] { photoURLs.compactMap { URL(string: $0) } }
+    private var photoThumbnailURLsAsURLs: [URL] { photoThumbnailURLs.compactMap { URL(string: $0) } }
+    private var photoDisplayURLsAsURLs: [URL] { photoDisplayURLs.compactMap { URL(string: $0) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,12 +48,12 @@ struct PostCellView: View {
             if !post.text.isEmpty {
                 bodyText
             }
-            if !photoURLs.isEmpty {
+            if !photoThumbnailURLs.isEmpty {
                 photoGridView
             } else if hasNonPhotoMedia {
                 mediaPlaceholder
             }
-            if post.likesCount > 0 || post.commentsCount > 0 {
+            if displayLikesCount > 0 || onLike != nil || post.commentsCount > 0 || onTapComments != nil {
                 likesCommentsRow
             }
         }
@@ -49,10 +64,10 @@ struct PostCellView: View {
             get: { fullScreenPhotoIndex != nil },
             set: { if !$0 { fullScreenPhotoIndex = nil } }
         )) {
-            if let idx = fullScreenPhotoIndex, !photoURLsAsURLs.isEmpty {
+            if let idx = fullScreenPhotoIndex, !photoDisplayURLsAsURLs.isEmpty {
                 FullScreenPhotoGalleryView(
-                    urls: photoURLsAsURLs,
-                    initialIndex: min(idx, photoURLsAsURLs.count - 1),
+                    urls: photoDisplayURLsAsURLs,
+                    initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
                     onDismiss: { fullScreenPhotoIndex = nil }
                 )
             }
@@ -146,12 +161,12 @@ struct PostCellView: View {
 
     /// Сетка фото: 1 — во всю ширину, 2 — два столбца, 3+ — до 3 столбцов.
     private var photoGridView: some View {
-        let count = photoURLs.count
+        let count = photoThumbnailURLs.count
         let columnsCount = count == 1 ? 1 : (count == 2 ? 2 : min(3, count))
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: columnsCount)
 
         return LazyVGrid(columns: columns, spacing: 4) {
-            ForEach(Array(photoURLs.enumerated()), id: \.offset) { index, urlString in
+            ForEach(Array(photoThumbnailURLs.enumerated()), id: \.offset) { index, urlString in
                 if let url = URL(string: urlString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
@@ -196,26 +211,45 @@ struct PostCellView: View {
 
     // MARK: - Лайки / комментарии (счётчики)
 
+    private var displayLikesCount: Int {
+        likesCountOverride ?? post.likesCount
+    }
+
+    private var displayIsLiked: Bool {
+        isLikedOverride ?? (post.likes?.userLikes == 1)
+    }
+
     private var likesCommentsRow: some View {
         HStack(spacing: 16) {
-            if post.likesCount > 0 {
-                Label("\(post.likesCount)", systemImage: "heart.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            if post.commentsCount > 0 {
-                if let onTap = onTapComments {
-                    Button(action: onTap) {
-                        Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            if displayLikesCount > 0 || onLike != nil {
+                if let action = onLike {
+                    Button(action: action) {
+                        Label(
+                            "\(displayLikesCount)",
+                            systemImage: displayIsLiked ? "heart.fill" : "heart"
+                        )
+                        .font(.caption)
+                        .foregroundColor(displayIsLiked ? .red : .secondary)
                     }
                     .buttonStyle(.plain)
+                    .disabled(likeInProgress)
                 } else {
+                    Label("\(displayLikesCount)", systemImage: "heart.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            if onTapComments != nil {
+                Button(action: { onTapComments?() }) {
                     Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
+            } else if post.commentsCount > 0 {
+                Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }

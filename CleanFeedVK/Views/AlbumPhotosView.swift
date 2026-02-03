@@ -60,7 +60,7 @@ struct AlbumPhotosView: View {
 
     private func photoCell(_ photo: VKPhoto) -> some View {
         Group {
-            if let urlString = photo.displayURL, let url = URL(string: urlString) {
+            if let urlString = photo.thumbnailDisplayURL ?? photo.displayURL, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):

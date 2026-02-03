@@ -23,7 +23,9 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var friendsLoadState: ProfileTabLoadState = .idle
 
     @Published private(set) var groups: [VKGroup] = []
+    @Published private(set) var groupsTotalCount: Int?
     @Published private(set) var groupsLoadState: ProfileTabLoadState = .idle
+    @Published private(set) var groupsLoadMoreLoading = false
 
     @Published private(set) var albums: [VKAlbum] = []
     @Published private(set) var albumsLoadState: ProfileTabLoadState = .idle
@@ -46,11 +48,10 @@ final class ProfileViewModel: ObservableObject {
         hasStartedInitialLoad = true
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] })
-            await MainActor.run {
-                Task { await loadFriends(forceRefresh: false) }
-                if userId == nil { Task { await loadGroups(forceRefresh: false) } }
-                Task { await loadAlbums(forceRefresh: false) }
-            }
+            let ownerIdForAlbums = user?.id ?? userId
+            Task { await loadFriends(forceRefresh: false) }
+            if userId == nil { Task { await loadGroups(forceRefresh: false) } }
+            if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: false) } }
         }
     }
 
@@ -60,11 +61,10 @@ final class ProfileViewModel: ObservableObject {
         hasStartedInitialLoad = true
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] }, forceRefresh: true)
-            await MainActor.run {
-                Task { await loadFriends(forceRefresh: true) }
-                if userId == nil { Task { await loadGroups(forceRefresh: true) } }
-                Task { await loadAlbums(forceRefresh: true) }
-            }
+            let ownerIdForAlbums = user?.id ?? userId
+            Task { await loadFriends(forceRefresh: true) }
+            if userId == nil { Task { await loadGroups(forceRefresh: true) } }
+            if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: true) } }
         }
     }
 
@@ -104,15 +104,18 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    private let groupsPageSize = 20
+
     func loadGroups(forceRefresh: Bool) async {
         if !forceRefresh, case .loading = groupsLoadState { return }
         if !forceRefresh, case .loaded = groupsLoadState { return }
         guard let token = authService.accessToken else { return }
         await MainActor.run { groupsLoadState = .loading }
         do {
-            let response = try await vkApi.getGroups(token: token)
+            let response = try await vkApi.getGroups(token: token, count: groupsPageSize, offset: 0)
             await MainActor.run {
                 groups = response.items
+                groupsTotalCount = response.count
                 groupsLoadState = .loaded
             }
         } catch {
@@ -120,11 +123,29 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func loadAlbums(forceRefresh: Bool) async {
+    /// Подгрузка следующих групп при достижении низа списка (по 20).
+    func loadMoreGroups() async {
+        guard let total = groupsTotalCount, groups.count < total else { return }
+        guard !groupsLoadMoreLoading else { return }
+        guard let token = authService.accessToken else { return }
+        await MainActor.run { groupsLoadMoreLoading = true }
+        do {
+            let response = try await vkApi.getGroups(token: token, count: groupsPageSize, offset: groups.count)
+            await MainActor.run {
+                groups.append(contentsOf: response.items)
+                groupsLoadMoreLoading = false
+            }
+        } catch {
+            await MainActor.run { groupsLoadMoreLoading = false }
+        }
+    }
+
+    /// ownerId — явно переданный ID (свой или друга); без него альбомы не запрашиваем.
+    func loadAlbums(ownerId: Int?, forceRefresh: Bool) async {
+        guard let ownerId = ownerId else { return }
         if !forceRefresh, case .loading = albumsLoadState { return }
         if !forceRefresh, case .loaded = albumsLoadState { return }
         guard let token = authService.accessToken else { return }
-        guard let ownerId = user?.id ?? userId else { return }
         await MainActor.run { albumsLoadState = .loading }
         do {
             let response = try await vkApi.getPhotosAlbums(token: token, ownerId: ownerId)

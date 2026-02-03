@@ -336,6 +336,7 @@ final class VKApiService: Sendable {
 
     /// Комментарии к посту. ownerId — владелец стены (знак сохраняется: группа отрицательная).
     /// sort: asc (старые первые) или desc (новые первые). Пагинация: offset, count (по 5).
+    /// threadItemsCount — сколько ответов подтягивать в thread каждого комментария (0 = не подтягивать).
     func getWallComments(
         token: String,
         ownerId: Int,
@@ -344,7 +345,8 @@ final class VKApiService: Sendable {
         count: Int = 5,
         sort: String = "asc",
         needLikes: Int = 1,
-        extended: Int = 1
+        extended: Int = 1,
+        threadItemsCount: Int = 10
     ) async throws -> WallGetCommentsResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -356,7 +358,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "sort", value: sort),
             URLQueryItem(name: "need_likes", value: String(needLikes)),
-            URLQueryItem(name: "extended", value: String(extended))
+            URLQueryItem(name: "extended", value: String(extended)),
+            URLQueryItem(name: "thread_items_count", value: String(threadItemsCount))
         ]
         guard var components = URLComponents(string: "\(baseURL)/wall.getComments") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
@@ -367,5 +370,143 @@ final class VKApiService: Sendable {
         let response = try await requestVK(WallGetCommentsResponse.self, from: request)
         logger?.info("VKApi", "wall.getComments ok count=\(response.count) items=\(response.items.count)")
         return response
+    }
+
+    // MARK: - likes.add
+
+    /// Ставить лайк на пост или комментарий. type: "post" | "comment". item_id — id поста или комментария.
+    /// Возвращает новое количество лайков (или 1 для комментария).
+    func likesAdd(
+        token: String,
+        type: String,
+        ownerId: Int,
+        itemId: Int
+    ) async throws -> Int {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "type", value: type),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "item_id", value: String(itemId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/likes.add") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "likes.add type=\(type) ownerId=\(ownerId) itemId=\(itemId)")
+        let (data, response) = try await network.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            logger?.error("VKApi", "likes.add invalid response", error: nil)
+            throw NetworkError.invalidResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            logger?.error("VKApi", "likes.add HTTP \(http.statusCode)", error: nil)
+            throw NetworkError.httpStatus(http.statusCode, data)
+        }
+        if let errWrapper = try? decoder.decode(VKErrorWrapper.self, from: data) {
+            let msg = errWrapper.error.errorMsg ?? "Ошибка VK \(errWrapper.error.errorCode)"
+            logger?.error("VKApi", "likes.add API error \(errWrapper.error.errorCode): \(msg)", error: nil)
+            throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
+        }
+        do {
+            let wrapper = try decoder.decode(VKResponse<VKLikesAddResponse>.self, from: data)
+            let count = wrapper.response.likesCount
+            logger?.info("VKApi", "likes.add ok likes=\(count)")
+            return count
+        } catch {
+            if let body = String(data: data, encoding: .utf8) {
+                logger?.error("VKApi", "likes.add decode failed, body=\(body)", error: error)
+            } else {
+                logger?.error("VKApi", "likes.add decode failed", error: error)
+            }
+            throw error
+        }
+    }
+
+    // MARK: - likes.delete
+
+    /// Убрать лайк с поста или комментария. type: "post" | "comment". Возвращает новое количество лайков.
+    func likesDelete(
+        token: String,
+        type: String,
+        ownerId: Int,
+        itemId: Int
+    ) async throws -> Int {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "type", value: type),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "item_id", value: String(itemId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/likes.delete") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "likes.delete type=\(type) ownerId=\(ownerId) itemId=\(itemId)")
+        let (data, response) = try await network.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            logger?.error("VKApi", "likes.delete invalid response", error: nil)
+            throw NetworkError.invalidResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            logger?.error("VKApi", "likes.delete HTTP \(http.statusCode)", error: nil)
+            throw NetworkError.httpStatus(http.statusCode, data)
+        }
+        if let errWrapper = try? decoder.decode(VKErrorWrapper.self, from: data) {
+            let msg = errWrapper.error.errorMsg ?? "Ошибка VK \(errWrapper.error.errorCode)"
+            logger?.error("VKApi", "likes.delete API error \(errWrapper.error.errorCode): \(msg)", error: nil)
+            throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
+        }
+        do {
+            let wrapper = try decoder.decode(VKResponse<VKLikesAddResponse>.self, from: data)
+            let count = wrapper.response.likesCount
+            logger?.info("VKApi", "likes.delete ok likes=\(count)")
+            return count
+        } catch {
+            if let body = String(data: data, encoding: .utf8) {
+                logger?.error("VKApi", "likes.delete decode failed, body=\(body)", error: error)
+            } else {
+                logger?.error("VKApi", "likes.delete decode failed", error: error)
+            }
+            throw error
+        }
+    }
+
+    // MARK: - wall.createComment
+
+    /// Добавить комментарий к посту. replyTo — id комментария для ответа; nil — корневой комментарий.
+    /// Возвращает id созданного комментария.
+    func wallCreateComment(
+        token: String,
+        ownerId: Int,
+        postId: Int,
+        message: String,
+        replyTo: Int? = nil
+    ) async throws -> Int {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "post_id", value: String(postId)),
+            URLQueryItem(name: "message", value: message)
+        ]
+        if let reply = replyTo {
+            queryItems.append(URLQueryItem(name: "reply_to_comment", value: String(reply)))
+        }
+        guard var components = URLComponents(string: "\(baseURL)/wall.createComment") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "wall.createComment ownerId=\(ownerId) postId=\(postId) replyTo=\(replyTo ?? 0)")
+        let response = try await requestVK(VKWallCreateCommentResponse.self, from: request)
+        logger?.info("VKApi", "wall.createComment ok commentId=\(response.commentId)")
+        return response.commentId
     }
 }
