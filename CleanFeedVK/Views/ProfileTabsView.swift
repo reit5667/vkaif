@@ -95,6 +95,11 @@ struct AlbumDestination: Hashable {
     let title: String
 }
 
+/// Цель навигации из вкладки «Группы» профиля (отдельно от Int для друзей).
+struct GroupDestination: Hashable {
+    let groupId: Int
+}
+
 // MARK: - Вкладка «Друзья» (данные передаются из ProfileView)
 
 struct ProfileFriendsTabView: View {
@@ -178,13 +183,18 @@ struct ProfileGroupsTabView: View {
                     ContentUnavailableView("Нет групп", systemImage: "person.3")
                 } else {
                     List(groups, id: \.id) { group in
-                        HStack(spacing: 12) {
-                            groupAvatar(group)
-                            Text(group.name ?? "Группа \(group.id)")
-                                .font(.body)
+                        NavigationLink(value: GroupDestination(groupId: group.id)) {
+                            HStack(spacing: 12) {
+                                groupAvatar(group)
+                                Text(group.name ?? "Группа \(group.id)")
+                                    .font(.body)
+                            }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .navigationDestination(for: GroupDestination.self) { dest in
+                        GroupWallView(authService: authService, groupId: dest.groupId)
+                    }
                 }
             case .failed(let error):
                 ContentUnavailableView(

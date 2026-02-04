@@ -278,9 +278,27 @@ struct VKAttachment: Decodable {
     }
 }
 
+/// Лайки фото (photos.get возвращает в каждом фото).
+struct VKPhotoLikes: Decodable {
+    let count: Int
+    let userLikes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case userLikes = "user_likes"
+    }
+}
+
+/// Счётчик комментариев к фото (photos.get).
+struct VKPhotoComments: Decodable {
+    let count: Int
+}
+
 struct VKPhoto: Decodable {
     let id: Int
     let sizes: [VKPhotoSize]?
+    let likes: VKPhotoLikes?
+    let comments: VKPhotoComments?
 
     /// URL для отображения: приоритет размеров (x→m→s и w,z,y,r,q,p,o) → первый доступный.
     var displayURL: String? {

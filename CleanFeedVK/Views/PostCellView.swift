@@ -65,6 +65,7 @@ struct PostCellView: View {
             set: { if !$0 { fullScreenPhotoIndex = nil } }
         )) {
             if let idx = fullScreenPhotoIndex, !photoDisplayURLsAsURLs.isEmpty {
+                let ownerId = post.ownerId ?? post.fromId ?? 0
                 FullScreenPhotoGalleryView(
                     urls: photoDisplayURLsAsURLs,
                     initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
@@ -73,9 +74,11 @@ struct PostCellView: View {
                     commentsCount: post.commentsCount,
                     isLiked: displayIsLiked,
                     onLike: likeInProgress ? nil : onLike,
-                    onTapComments: onTapComments.map { tapComments in
-                        { fullScreenPhotoIndex = nil; tapComments() }
-                    }
+                    onTapComments: onTapComments,
+                    postCommentsContext: (onTapComments != nil && authService != nil)
+                        ? PostCommentsContext(ownerId: ownerId, postId: post.id, totalCount: post.commentsCount)
+                        : nil,
+                    authService: authService
                 )
             }
         }

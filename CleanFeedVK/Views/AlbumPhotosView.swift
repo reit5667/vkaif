@@ -16,6 +16,10 @@ struct AlbumPhotosView: View {
     @State private var isFullScreenPresented = false
     /// true = сначала новые (rev=1), false = сначала старые (rev=0).
     @State private var sortNewestFirst = true
+    /// Переопределения лайков после likes.add/delete по фото (photoId -> count / liked).
+    @State private var photoLikeOverrides: [Int: Int] = [:]
+    @State private var photoLikedOverrides: [Int: Bool] = [:]
+    @State private var photoLikeInProgress: Set<Int> = []
 
     private let vkApi = VKApiService()
     private let pageSize = 50
@@ -83,11 +87,21 @@ struct AlbumPhotosView: View {
         }
         .fullScreenCover(isPresented: $isFullScreenPresented) {
             let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+            let idx = min(fullScreenInitialIndex, photos.count - 1)
+            let photo = photos.indices.contains(idx) ? photos[idx] : nil
             if !urls.isEmpty {
                 FullScreenPhotoGalleryView(
                     urls: urls,
                     initialIndex: min(fullScreenInitialIndex, urls.count - 1),
-                    onDismiss: { isFullScreenPresented = false }
+                    onDismiss: { isFullScreenPresented = false },
+                    likesCount: photo.map { photoLikeOverrides[$0.id] ?? $0.likes?.count ?? 0 } ?? 0,
+                    commentsCount: photo.map { $0.comments?.count ?? 0 } ?? 0,
+                    isLiked: photo.map { photoLikedOverrides[$0.id] ?? ($0.likes?.userLikes == 1) } ?? false,
+                    onLike: photo.map { p in
+                        photoLikeInProgress.contains(p.id) ? nil : { likeTogglePhoto(photoId: p.id) }
+                    } ?? nil,
+                    photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
+                    authService: authService
                 )
             }
         }
@@ -174,6 +188,46 @@ struct AlbumPhotosView: View {
         photos = []
         totalCount = 0
         loadPhotos(offset: 0, append: false)
+    }
+
+    /// Toggle лайка фото: likes.add / likes.delete type "photo".
+    private func likeTogglePhoto(photoId: Int) {
+        guard let token = authService.accessToken else { return }
+        if photoLikeInProgress.contains(photoId) { return }
+        let isLiked = photoLikedOverrides[photoId] ?? (photos.first(where: { $0.id == photoId })?.likes?.userLikes == 1)
+        photoLikeInProgress.insert(photoId)
+        Task {
+            do {
+                let newCount: Int
+                if isLiked {
+                    newCount = try await vkApi.likesDelete(
+                        token: token,
+                        type: "photo",
+                        ownerId: ownerId,
+                        itemId: photoId
+                    )
+                    await MainActor.run {
+                        photoLikeOverrides[photoId] = newCount
+                        photoLikedOverrides[photoId] = false
+                        photoLikeInProgress.remove(photoId)
+                    }
+                } else {
+                    newCount = try await vkApi.likesAdd(
+                        token: token,
+                        type: "photo",
+                        ownerId: ownerId,
+                        itemId: photoId
+                    )
+                    await MainActor.run {
+                        photoLikeOverrides[photoId] = newCount
+                        photoLikedOverrides[photoId] = true
+                        photoLikeInProgress.remove(photoId)
+                    }
+                }
+            } catch {
+                await MainActor.run { photoLikeInProgress.remove(photoId) }
+            }
+        }
     }
 }
 

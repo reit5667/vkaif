@@ -90,6 +90,13 @@ struct PostCommentsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("Назад", systemImage: "chevron.left")
+                    }
+                }
+                ToolbarItem(placement: .topBarLeading) {
                     if case .loaded = loadState {
                         Button("Добавить комментарий") {
                             addCommentTarget = .root

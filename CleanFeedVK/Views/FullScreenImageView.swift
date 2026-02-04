@@ -50,6 +50,7 @@ struct FullScreenImageView: View {
 // MARK: - Галерея с пролистыванием (пост / альбом)
 
 /// Несколько фото на весь экран: PageView, панель по тапу (лайк, комментарии, 3 точки), закрытие — кнопка или свайп вниз.
+/// Если передан postCommentsContext или photoCommentsContext + authService — sheet комментариев показывается из галереи (поверх fullscreen).
 struct FullScreenPhotoGalleryView: View {
     let urls: [URL]
     let initialIndex: Int
@@ -61,11 +62,18 @@ struct FullScreenPhotoGalleryView: View {
     var isLiked: Bool = false
     var onLike: (() -> Void)? = nil
     var onTapComments: (() -> Void)? = nil
+    /// Контекст комментариев к посту — sheet показывается из галереи, поверх fullscreen.
+    var postCommentsContext: PostCommentsContext? = nil
+    /// Контекст комментариев к фото (альбом) — sheet показывается из галереи.
+    var photoCommentsContext: PhotoCommentsContext? = nil
+    var authService: AuthService? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
     /// Локальное переопределение после тапа «Нравится» до закрытия галереи.
     @State private var likedOverride: Bool? = nil
+    @State private var presentedPostComments: PostCommentsContext? = nil
+    @State private var presentedPhotoComments: PhotoCommentsContext? = nil
 
     init(
         urls: [URL],
@@ -75,7 +83,10 @@ struct FullScreenPhotoGalleryView: View {
         commentsCount: Int? = nil,
         isLiked: Bool = false,
         onLike: (() -> Void)? = nil,
-        onTapComments: (() -> Void)? = nil
+        onTapComments: (() -> Void)? = nil,
+        postCommentsContext: PostCommentsContext? = nil,
+        photoCommentsContext: PhotoCommentsContext? = nil,
+        authService: AuthService? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -85,6 +96,9 @@ struct FullScreenPhotoGalleryView: View {
         self.isLiked = isLiked
         self.onLike = onLike
         self.onTapComments = onTapComments
+        self.postCommentsContext = postCommentsContext
+        self.photoCommentsContext = photoCommentsContext
+        self.authService = authService
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
     }
 
@@ -183,6 +197,16 @@ struct FullScreenPhotoGalleryView: View {
             }
         }
         .onAppear { currentIndex = initialIndex }
+        .sheet(item: $presentedPostComments) { ctx in
+            if let auth = authService {
+                PostCommentsView(context: ctx, authService: auth)
+            }
+        }
+        .sheet(item: $presentedPhotoComments) { ctx in
+            if let auth = authService {
+                PhotoCommentsView(context: ctx, authService: auth)
+            }
+        }
     }
 
     private var topBar: some View {
@@ -246,8 +270,16 @@ struct FullScreenPhotoGalleryView: View {
                 .foregroundStyle(.white)
             }
 
-            if let action = onTapComments {
-                Button(action: action) {
+            if postCommentsContext != nil || photoCommentsContext != nil || onTapComments != nil {
+                Button {
+                    if let ctx = postCommentsContext, authService != nil {
+                        presentedPostComments = ctx
+                    } else if let ctx = photoCommentsContext, authService != nil {
+                        presentedPhotoComments = ctx
+                    } else {
+                        onTapComments?()
+                    }
+                } label: {
                     if let n = commentsCount {
                         Label("Комментарии (\(n))", systemImage: "bubble.right")
                     } else {
