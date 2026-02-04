@@ -74,7 +74,8 @@ struct GroupWallView: View {
                                         videoPlayerURL = url
                                         videoPlayerPost = post
                                     }
-                                }
+                                },
+                                onAddToSaved: { oid, pid in await addPhotoToSaved(ownerId: oid, photoId: pid) }
                             )
                             .padding(.vertical, 8)
                             Divider()
@@ -223,5 +224,13 @@ struct GroupWallView: View {
                 await MainActor.run { likeInProgress.remove(pid) }
             }
         }
+    }
+
+    private func addPhotoToSaved(ownerId: Int, photoId: Int) async -> Bool {
+        guard let token = authService.accessToken else { return false }
+        do {
+            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch { return false }
     }
 }

@@ -521,6 +521,34 @@ final class VKApiService: Sendable {
         return response
     }
 
+    // MARK: - polls.addVote
+
+    /// Проголосовать в опросе. owner_id — владелец опроса (отрицательный для группы). answer_ids — один id для одиночного выбора.
+    /// Возвращает 1 при успехе.
+    func addPollVote(
+        token: String,
+        ownerId: Int,
+        pollId: Int,
+        answerId: Int
+    ) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "poll_id", value: String(pollId)),
+            URLQueryItem(name: "answer_ids", value: String(answerId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/polls.addVote") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "polls.addVote ownerId=\(ownerId) pollId=\(pollId) answerId=\(answerId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "polls.addVote ok")
+    }
+
     // MARK: - likes.add
 
     /// Ставить лайк на пост или комментарий. type: "post" | "comment". item_id — id поста или комментария.

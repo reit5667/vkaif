@@ -1,5 +1,14 @@
 import SwiftUI
 
+// MARK: - Переопределение опроса после голосования (оптимистичное отображение)
+
+/// Состояние опроса после успешного голоса: выбранный вариант и обновлённые счётчики.
+struct PollVoteOverride {
+    let selectedAnswerId: Int
+    let totalVotes: Int
+    let answerVotes: [Int: Int]
+}
+
 // MARK: - Ячейка поста ленты
 
 /// Заголовок: аватар, имя, относительная дата. Тело: текст с «Показать ещё». Медиа: сетка фото (1–10).
@@ -24,6 +33,12 @@ struct PostCellView: View {
     var likeInProgress: Bool = false
     /// Тап по видео → загрузка player URL и открытие плеера. Передаётся пост для панели лайков/комментариев.
     var onTapVideo: ((VKVideo, Int, VKPost) async -> Void)? = nil
+    /// Переопределения опросов после голосования. Ключ: "ownerId_postId_pollId".
+    var pollVoteOverrides: [String: PollVoteOverride]? = nil
+    /// Тап по варианту опроса → голос. (post, poll, answerId). nil = только отображение.
+    var onPollVote: ((VKPost, VKPoll, Int) -> Void)? = nil
+    /// Ключи опросов, по которым идёт запрос голоса (блокируем повторный тап).
+    var pollVoteInProgress: Set<String> = []
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
@@ -43,6 +58,18 @@ struct PostCellView: View {
 
     private var photoThumbnailURLsAsURLs: [URL] { photoThumbnailURLs.compactMap { URL(string: $0) } }
     private var photoDisplayURLsAsURLs: [URL] { photoDisplayURLs.compactMap { URL(string: $0) } }
+
+    /// (owner_id, photo_id) для каждого фото поста — в том же порядке, что и photoDisplayURLs (для «Добавить в сохранённые» в fullscreen).
+    private var photoIdsForSavingFromPost: [(ownerId: Int, photoId: Int)] {
+        let owner = post.ownerId ?? post.fromId ?? 0
+        return (post.attachments ?? []).compactMap { att -> (Int, Int)? in
+            guard let p = att.photo else { return nil }
+            return (owner, p.id)
+        }
+    }
+
+    /// Тап «Добавить в сохранённые» в fullscreen галерее фото поста. nil = пункт неактивен.
+    var onAddToSaved: ((Int, Int) async -> Bool)? = nil
 
     /// Видео из вложений поста с ownerId для плеера/video.get.
     private var videoAttachments: [(video: VKVideo, ownerId: Int)] {
@@ -116,7 +143,9 @@ struct PostCellView: View {
                     postCommentsContext: (onTapComments != nil && authService != nil)
                         ? PostCommentsContext(ownerId: ownerId, postId: post.id, totalCount: post.commentsCount)
                         : nil,
-                    authService: authService
+                    authService: authService,
+                    photoIdsForSaving: photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost,
+                    onAddToSaved: onAddToSaved
                 )
             }
         }
@@ -355,10 +384,20 @@ struct PostCellView: View {
         }
     }
 
-    /// Опросы: вопрос и варианты ответов (только отображение).
+    private func pollVoteKey(_ poll: VKPoll) -> String {
+        let owner = post.ownerId ?? post.fromId ?? 0
+        return "\(owner)_\(post.id)_\(poll.id)"
+    }
+
+    /// Опросы: вопрос, варианты; при onPollVote — тап по варианту отправляет голос; после голоса — выбор и счётчики из override.
     private var pollRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(pollAttachments.enumerated()), id: \.offset) { _, poll in
+                let key = pollVoteKey(poll)
+                let override = pollVoteOverrides?[key]
+                let inProgress = pollVoteInProgress.contains(key)
+                let canVote = onPollVote != nil && (poll.closed != true) && override == nil && !inProgress
+
                 VStack(alignment: .leading, spacing: 6) {
                     if let q = poll.question, !q.isEmpty {
                         Text(q)
@@ -366,30 +405,53 @@ struct PostCellView: View {
                             .fontWeight(.medium)
                     }
                     if let answers = poll.answers, !answers.isEmpty {
+                        let totalVotes = override?.totalVotes ?? poll.votes ?? 0
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(answers, id: \.id) { a in
+                                let voteCount = override?.answerVotes[a.id] ?? a.votes ?? 0
+                                let isSelected = override?.selectedAnswerId == a.id
+                                let ratePercent: Int? = totalVotes > 0 ? Int((Double(voteCount) / Double(totalVotes)) * 100) : nil
                                 HStack(spacing: 8) {
                                     Text(a.text ?? "")
                                         .font(.caption)
                                         .foregroundColor(.primary)
-                                    if let v = a.votes {
-                                        Text("\(v)")
+                                    if let pct = ratePercent {
+                                        Text("\(pct)%")
                                             .font(.caption2)
                                             .foregroundColor(.secondary)
+                                    }
+                                    Text("\(voteCount)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    if isSelected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.accentColor)
                                     }
                                     Spacer(minLength: 0)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color(.systemGray6))
+                                .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
                                 .cornerRadius(6)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    guard canVote else { return }
+                                    onPollVote?(post, poll, a.id)
+                                }
+                                .disabled(!canVote)
                             }
                         }
                     }
-                    if let votes = poll.votes {
+                    if let votes = override?.totalVotes ?? poll.votes {
                         Text("Всего голосов: \(votes)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+                    }
+                    if inProgress {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(10)

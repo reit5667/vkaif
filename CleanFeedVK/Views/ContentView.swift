@@ -32,6 +32,9 @@ struct ContentView: View {
     @State private var likeInProgress: Set<String> = []  // postId, чтобы не дублировать запросы
     @State private var videoPlayerURL: URL? = nil
     @State private var videoPlayerPost: VKPost? = nil
+    /// Переопределения опросов после голосования. Ключ: "ownerId_postId_pollId".
+    @State private var pollVoteOverrides: [String: PollVoteOverride] = [:]
+    @State private var pollVoteInProgress: Set<String> = []
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -91,6 +94,8 @@ struct ContentView: View {
                     nextFrom = nil
                     postLikeOverrides = [:]
                     postLikedOverrides = [:]
+                    pollVoteOverrides = [:]
+                    pollVoteInProgress = []
                 }
             }
         }
@@ -137,7 +142,11 @@ struct ContentView: View {
                                 videoPlayerURL = url
                                 videoPlayerPost = post
                             }
-                        }
+                        },
+                        pollVoteOverrides: pollVoteOverrides,
+                        onPollVote: { p, poll, answerId in pollVote(post: p, poll: poll, answerId: answerId) },
+                        pollVoteInProgress: pollVoteInProgress,
+                        onAddToSaved: { ownerId, photoId in await addPhotoToSaved(ownerId: ownerId, photoId: photoId) }
                     )
                     .padding(.vertical, 8)
                     Divider()
@@ -433,6 +442,55 @@ struct ContentView: View {
             } catch {
                 await MainActor.run { likeInProgress.remove(pid) }
             }
+        }
+    }
+
+    private func pollVote(post: VKPost, poll: VKPoll, answerId: Int) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = poll.ownerId ?? post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let key = "\(ownerId)_\(post.id)_\(poll.id)"
+        if pollVoteInProgress.contains(key) { return }
+        pollVoteInProgress.insert(key)
+        Task {
+            do {
+                try await vkApi.addPollVote(
+                    token: token,
+                    ownerId: ownerId,
+                    pollId: poll.id,
+                    answerId: answerId
+                )
+                let totalBefore = poll.votes ?? 0
+                let totalVotes = totalBefore + 1
+                var answerVotes: [Int: Int] = [:]
+                for a in poll.answers ?? [] {
+                    let v = a.votes ?? 0
+                    answerVotes[a.id] = a.id == answerId ? v + 1 : v
+                }
+                await MainActor.run {
+                    pollVoteOverrides[key] = PollVoteOverride(
+                        selectedAnswerId: answerId,
+                        totalVotes: totalVotes,
+                        answerVotes: answerVotes
+                    )
+                    pollVoteInProgress.remove(key)
+                }
+            } catch {
+                await MainActor.run { pollVoteInProgress.remove(key) }
+            }
+        }
+    }
+
+    private func addPhotoToSaved(ownerId: Int, photoId: Int) async -> Bool {
+        guard let token = authService.accessToken else { return false }
+        do {
+            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch {
+            #if DEBUG
+            print("[CleanFeedVK] addPhotoToSaved failed: \(error)")
+            #endif
+            return false
         }
     }
 

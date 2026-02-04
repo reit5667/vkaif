@@ -76,6 +76,7 @@ struct FullScreenPhotoGalleryView: View {
     @State private var overlayVisible = false
     @State private var addToSavedInProgress = false
     @State private var addToSavedDone = false
+    @State private var addToSavedFailed = false
     /// Локальное переопределение после тапа «Нравится» до закрытия галереи.
     @State private var likedOverride: Bool? = nil
     @State private var presentedPostComments: PostCommentsContext? = nil
@@ -237,16 +238,18 @@ struct FullScreenPhotoGalleryView: View {
                     if let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone {
                         let pair = ids[currentIndex]
                         addToSavedInProgress = true
+                        addToSavedFailed = false
                         Task {
                             let ok = await save(pair.ownerId, pair.photoId)
                             await MainActor.run {
                                 addToSavedInProgress = false
-                                if ok { addToSavedDone = true }
+                                if ok { addToSavedDone = true } else { addToSavedFailed = true }
                             }
                         }
                     }
                 } label: {
-                    Label(addToSavedDone ? "Добавлено в сохранённые" : "Добавить в сохранённые", systemImage: "square.and.arrow.down")
+                    let title = addToSavedDone ? "Добавлено в сохранённые" : (addToSavedFailed ? "Не удалось сохранить" : "Добавить в сохранённые")
+                    Label(title, systemImage: addToSavedDone ? "checkmark.circle" : "square.and.arrow.down")
                 }
                 .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || onAddToSaved == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
                 Divider()

@@ -575,8 +575,11 @@ struct VKUserDetail: Decodable {
         return name.isEmpty ? "ID\(id)" : name
     }
 
-    /// URL аватара для экрана профиля: photo_200 или photo_50.
+    /// URL аватара для экрана профиля: photo_200 или photo_50 (для списков и мелких мест).
     var avatarURL: String? { photo200 ?? photo50 }
+
+    /// URL аватара в шапке профиля: по возможности крупнее (photo_400 → photo_200 → photo_50), чтобы не была «миниатюра».
+    var headerAvatarURL: String? { photo400 ?? photo200 ?? photo50 }
 
     /// URL для полноэкранного просмотра: photo_max_orig → photo_max → photo_400 → photo_200. Качество зависит от того, что вернул VK.
     var fullScreenAvatarURL: String? { photoMaxOrig ?? photoMax ?? photo400 ?? photo200 ?? photo50 }
