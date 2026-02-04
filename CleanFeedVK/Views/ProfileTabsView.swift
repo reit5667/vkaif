@@ -1,5 +1,156 @@
 import SwiftUI
 
+// MARK: - Вкладка «Стена»: посты на стене пользователя (wall.get)
+
+struct ProfileWallTabView: View {
+    let posts: [VKPost]
+    let loadState: ProfileTabLoadState
+    let user: VKUserDetail
+    @ObservedObject var authService: AuthService
+    var onRefresh: () async -> Void
+
+    @State private var commentsContext: PostCommentsContext? = nil
+    @State private var postLikeOverrides: [String: Int] = [:]
+    @State private var postLikedOverrides: [String: Bool] = [:]
+    @State private var likeInProgress: Set<String> = []
+    @State private var videoPlayerURL: URL? = nil
+    @State private var videoPlayerPost: VKPost? = nil
+
+    private let vkApi = VKApiService()
+    private var ownerId: Int { user.id }
+
+    var body: some View {
+        Group {
+            switch loadState {
+            case .idle, .loading:
+                ProgressView("Загрузка стены…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .loaded:
+                if posts.isEmpty {
+                    ContentUnavailableView("Нет записей", systemImage: "doc.text")
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(posts, id: \.postId) { post in
+                                PostCellView(
+                                    post: post,
+                                    authorName: user.displayName,
+                                    authorAvatarURL: user.avatarURL,
+                                    relativeDate: relativeDateString(from: post.date),
+                                    authService: authService,
+                                    feedDestination: nil,
+                                    onTapComments: {
+                                        commentsContext = PostCommentsContext(
+                                            ownerId: post.ownerId ?? ownerId,
+                                            postId: post.id,
+                                            totalCount: post.commentsCount
+                                        )
+                                    },
+                                    likesCountOverride: postLikeOverrides[post.postId],
+                                    isLikedOverride: postLikedOverrides[post.postId],
+                                    onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+                                    likeInProgress: likeInProgress.contains(post.postId),
+                                    onTapVideo: { video, ownerId, post in
+                                        var url: URL?
+                                        if let p = video.player, let u = URL(string: p) {
+                                            url = u
+                                        } else {
+                                            let token = await MainActor.run { authService.accessToken } ?? ""
+                                            if !token.isEmpty,
+                                               let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                                               let first = res.items.first,
+                                               let playerURL = first.player {
+                                                url = URL(string: playerURL)
+                                            }
+                                        }
+                                        await MainActor.run {
+                                            videoPlayerURL = url
+                                            videoPlayerPost = post
+                                        }
+                                    }
+                                )
+                                .padding(.vertical, 8)
+                                Divider()
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+            case .failed(let error):
+                ContentUnavailableView(
+                    "Ошибка загрузки стены",
+                    systemImage: "exclamationmark.triangle.fill",
+                    description: Text(error.localizedDescription)
+                )
+            }
+        }
+        .refreshable { await onRefresh() }
+        .sheet(item: $commentsContext) { ctx in
+            PostCommentsView(context: ctx, authService: authService)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { videoPlayerURL != nil },
+            set: { if !$0 { videoPlayerURL = nil; videoPlayerPost = nil } }
+        )) {
+            if let url = videoPlayerURL {
+                profileWallVideoPlayerContent(url: url)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func profileWallVideoPlayerContent(url: URL) -> some View {
+        let post = videoPlayerPost
+        let ctx: VideoPlayerPostContext? = post.map { p in
+            VideoPlayerPostContext(
+                likesCount: postLikeOverrides[p.postId] ?? p.likesCount,
+                commentsCount: p.commentsCount,
+                isLiked: postLikedOverrides[p.postId] ?? (p.likes?.userLikes == 1),
+                onLike: { likeToggle(p) },
+                onTapComments: {
+                    commentsContext = PostCommentsContext(
+                        ownerId: p.ownerId ?? ownerId,
+                        postId: p.id,
+                        totalCount: p.commentsCount
+                    )
+                }
+            )
+        }
+        VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil; videoPlayerPost = nil }, postContext: ctx)
+    }
+
+    private func likeToggle(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let wallOwnerId = post.ownerId ?? ownerId
+        let pid = post.postId
+        if likeInProgress.contains(pid) { return }
+        let isLiked = postLikedOverrides[pid] ?? (post.likes?.userLikes == 1)
+        likeInProgress.insert(pid)
+        Task {
+            do {
+                let newCount: Int
+                if isLiked {
+                    newCount = try await vkApi.likesDelete(token: token, type: "post", ownerId: wallOwnerId, itemId: post.id)
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = false
+                        likeInProgress.remove(pid)
+                    }
+                } else {
+                    newCount = try await vkApi.likesAdd(token: token, type: "post", ownerId: wallOwnerId, itemId: post.id)
+                    await MainActor.run {
+                        postLikeOverrides[pid] = newCount
+                        postLikedOverrides[pid] = true
+                        likeInProgress.remove(pid)
+                    }
+                }
+            } catch {
+                await MainActor.run { likeInProgress.remove(pid) }
+            }
+        }
+    }
+}
+
 // MARK: - Вкладка «Фото»: альбомы + Сохранённые (данные передаются из ProfileView)
 
 struct ProfilePhotoTabView: View {

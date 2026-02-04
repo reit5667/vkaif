@@ -28,6 +28,9 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var albums: [VKAlbum] = []
     @Published private(set) var albumsLoadState: ProfileTabLoadState = .idle
 
+    @Published private(set) var wallPosts: [VKPost] = []
+    @Published private(set) var wallLoadState: ProfileTabLoadState = .idle
+
     /// Защита от двойного onAppear: начальную загрузку запускаем только один раз.
     private var hasStartedInitialLoad = false
 
@@ -47,6 +50,7 @@ final class ProfileViewModel: ObservableObject {
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] })
             let ownerIdForAlbums = user?.id ?? userId
+            if let oid = user?.id ?? userId { Task { await loadWall(ownerId: oid, forceRefresh: false) } }
             Task { await loadFriends(forceRefresh: false) }
             if userId == nil { Task { await loadGroups(forceRefresh: false) } }
             if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: false) } }
@@ -60,6 +64,7 @@ final class ProfileViewModel: ObservableObject {
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] }, forceRefresh: true)
             let ownerIdForAlbums = user?.id ?? userId
+            if let oid = user?.id ?? userId { Task { await loadWall(ownerId: oid, forceRefresh: true) } }
             Task { await loadFriends(forceRefresh: true) }
             if userId == nil { Task { await loadGroups(forceRefresh: true) } }
             if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: true) } }
@@ -125,6 +130,24 @@ final class ProfileViewModel: ObservableObject {
             }
         } catch {
             await MainActor.run { groupsLoadState = .failed(error) }
+        }
+    }
+
+    /// Стена пользователя (wall.get). ownerId — id пользователя (положительный).
+    func loadWall(ownerId: Int?, forceRefresh: Bool) async {
+        guard let ownerId = ownerId else { return }
+        if !forceRefresh, case .loading = wallLoadState { return }
+        if !forceRefresh, case .loaded = wallLoadState { return }
+        guard let token = authService.accessToken else { return }
+        await MainActor.run { wallLoadState = .loading }
+        do {
+            let response = try await vkApi.getWall(token: token, ownerId: ownerId, count: 30, offset: 0)
+            await MainActor.run {
+                wallPosts = response.items
+                wallLoadState = .loaded
+            }
+        } catch {
+            await MainActor.run { wallLoadState = .failed(error) }
         }
     }
 

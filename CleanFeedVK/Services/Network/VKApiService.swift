@@ -255,6 +255,62 @@ final class VKApiService: Sendable {
         return response
     }
 
+    // MARK: - friends.getRequests
+
+    /// Заявки в друзья. sort: 0 = входящие, 1 = исходящие. Возвращает массив id.
+    func getFriendsRequests(
+        token: String,
+        offset: Int = 0,
+        count: Int = 50,
+        sort: Int = 0
+    ) async throws -> FriendsGetRequestsResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "sort", value: String(sort))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/friends.getRequests") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "friends.getRequests sort=\(sort)")
+        let response = try await requestVK(FriendsGetRequestsResponse.self, from: request)
+        logger?.info("VKApi", "friends.getRequests ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - friends.getSuggestions
+
+    /// Возможные друзья (рекомендации).
+    func getFriendsSuggestions(
+        token: String,
+        offset: Int = 0,
+        count: Int = 50,
+        fields: String = "photo_50"
+    ) async throws -> FriendsGetSuggestionsResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "fields", value: fields)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/friends.getSuggestions") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "friends.getSuggestions")
+        let response = try await requestVK(FriendsGetSuggestionsResponse.self, from: request)
+        logger?.info("VKApi", "friends.getSuggestions ok count=\(response.count)")
+        return response
+    }
+
     // MARK: - groups.get
 
     /// Сообщества текущего пользователя (все типы: группы, паблики, мероприятия). Без filter — все подписки, как в друзьях.
@@ -406,6 +462,62 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "photos.getComments ownerId=\(ownerId) photoId=\(photoId)")
         let response = try await requestVK(WallGetCommentsResponse.self, from: request)
         logger?.info("VKApi", "photos.getComments ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - photos.copy
+
+    /// Скопировать фото в «Сохранённые» пользователя. owner_id и photo_id — владелец и id фото.
+    func photosCopy(
+        token: String,
+        ownerId: Int,
+        photoId: Int,
+        accessKey: String? = nil
+    ) async throws -> PhotosCopyResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "photo_id", value: String(photoId))
+        ]
+        if let key = accessKey, !key.isEmpty {
+            queryItems.append(URLQueryItem(name: "access_key", value: key))
+        }
+        guard var components = URLComponents(string: "\(baseURL)/photos.copy") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "photos.copy ownerId=\(ownerId) photoId=\(photoId)")
+        let response = try await requestVK(PhotosCopyResponse.self, from: request)
+        logger?.info("VKApi", "photos.copy ok newOwnerId=\(response.ownerId) newId=\(response.id)")
+        return response
+    }
+
+    // MARK: - video.get
+
+    /// Получить видео по идентификатору "owner_id_video_id" (например "123_456"). Возвращает превью (image/first_frame) и player URL.
+    func getVideo(
+        token: String,
+        videos: String
+    ) async throws -> VideoGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [
+            URLQueryItem
+        ] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "videos", value: videos)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/video.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "video.get videos=\(videos)")
+        let response = try await requestVK(VideoGetResponse.self, from: request)
+        logger?.info("VKApi", "video.get ok count=\(response.count) items=\(response.items.count)")
         return response
     }
 

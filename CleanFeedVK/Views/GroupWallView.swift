@@ -13,6 +13,8 @@ struct GroupWallView: View {
     @State private var postLikeOverrides: [String: Int] = [:]
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []
+    @State private var videoPlayerURL: URL? = nil
+    @State private var videoPlayerPost: VKPost? = nil
 
     private let vkApi = VKApiService()
     private var ownerId: Int { -groupId }
@@ -54,7 +56,25 @@ struct GroupWallView: View {
                                 likesCountOverride: postLikeOverrides[post.postId],
                                 isLikedOverride: postLikedOverrides[post.postId],
                                 onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-                                likeInProgress: likeInProgress.contains(post.postId)
+                                likeInProgress: likeInProgress.contains(post.postId),
+                                onTapVideo: { video, ownerId, post in
+                                    var url: URL?
+                                    if let p = video.player, let u = URL(string: p) {
+                                        url = u
+                                    } else {
+                                        let token = await MainActor.run { authService.accessToken } ?? ""
+                                        if !token.isEmpty,
+                                           let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                                           let first = res.items.first,
+                                           let playerURL = first.player {
+                                            url = URL(string: playerURL)
+                                        }
+                                    }
+                                    await MainActor.run {
+                                        videoPlayerURL = url
+                                        videoPlayerPost = post
+                                    }
+                                }
                             )
                             .padding(.vertical, 8)
                             Divider()
@@ -83,6 +103,35 @@ struct GroupWallView: View {
         .sheet(item: $commentsContext) { ctx in
             PostCommentsView(context: ctx, authService: authService)
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { videoPlayerURL != nil },
+            set: { if !$0 { videoPlayerURL = nil; videoPlayerPost = nil } }
+        )) {
+            if let url = videoPlayerURL {
+                groupWallVideoPlayerContent(url: url)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupWallVideoPlayerContent(url: URL) -> some View {
+        let post = videoPlayerPost
+        let ctx: VideoPlayerPostContext? = post.map { p in
+            VideoPlayerPostContext(
+                likesCount: postLikeOverrides[p.postId] ?? p.likesCount,
+                commentsCount: p.commentsCount,
+                isLiked: postLikedOverrides[p.postId] ?? (p.likes?.userLikes == 1),
+                onLike: { likeToggle(p) },
+                onTapComments: {
+                    commentsContext = PostCommentsContext(
+                        ownerId: p.ownerId ?? ownerId,
+                        postId: p.id,
+                        totalCount: p.commentsCount
+                    )
+                }
+            )
+        }
+        VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil; videoPlayerPost = nil }, postContext: ctx)
     }
 
     private func groupHeader(group: VKGroup) -> some View {

@@ -30,6 +30,8 @@ struct ContentView: View {
     /// Переопределения «лайкнуто» после likes.add (postId -> true).
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []  // postId, чтобы не дублировать запросы
+    @State private var videoPlayerURL: URL? = nil
+    @State private var videoPlayerPost: VKPost? = nil
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -43,6 +45,14 @@ struct ContentView: View {
                             feedTabContent
                         }
                         .tabItem { Label("Лента", systemImage: "list.bullet.rectangle") }
+                        NavigationStack {
+                            FriendsTabView(authService: authService)
+                        }
+                        .tabItem { Label("Друзья", systemImage: "person.2") }
+                        NavigationStack {
+                            MessagesStubView()
+                        }
+                        .tabItem { Label("Сообщения", systemImage: "bubble.left.and.bubble.right") }
                         NavigationStack {
                             ProfileView(authService: authService, viewModel: profileViewModel)
                         }
@@ -109,7 +119,25 @@ struct ContentView: View {
                         likesCountOverride: postLikeOverrides[post.postId],
                         isLikedOverride: postLikedOverrides[post.postId],
                         onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-                        likeInProgress: likeInProgress.contains(post.postId)
+                        likeInProgress: likeInProgress.contains(post.postId),
+                        onTapVideo: { video, ownerId, post in
+                            var url: URL?
+                            if let p = video.player, let u = URL(string: p) {
+                                url = u
+                            } else {
+                                let token = await MainActor.run { authService.accessToken } ?? ""
+                                if !token.isEmpty,
+                                   let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                                   let first = res.items.first,
+                                   let playerURL = first.player {
+                                    url = URL(string: playerURL)
+                                }
+                            }
+                            await MainActor.run {
+                                videoPlayerURL = url
+                                videoPlayerPost = post
+                            }
+                        }
                     )
                     .padding(.vertical, 8)
                     Divider()
@@ -141,6 +169,14 @@ struct ContentView: View {
         .sheet(item: $commentsContext) { ctx in
             PostCommentsView(context: ctx, authService: authService)
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { videoPlayerURL != nil },
+            set: { if !$0 { videoPlayerURL = nil; videoPlayerPost = nil } }
+        )) {
+            if let url = videoPlayerURL {
+                videoPlayerContent(url: url)
+            }
+        }
         .overlay(alignment: .top) {
             if feedLoadState.isLoading {
                 ProgressView("Загрузка…")
@@ -149,6 +185,27 @@ struct ContentView: View {
                     .cornerRadius(8)
             }
         }
+    }
+
+    @ViewBuilder
+    private func videoPlayerContent(url: URL) -> some View {
+        let post = videoPlayerPost
+        let ctx: VideoPlayerPostContext? = post.map { p in
+            VideoPlayerPostContext(
+                likesCount: postLikeOverrides[p.postId] ?? p.likesCount,
+                commentsCount: p.commentsCount,
+                isLiked: postLikedOverrides[p.postId] ?? (p.likes?.userLikes == 1),
+                onLike: { likeToggle(p) },
+                onTapComments: {
+                    commentsContext = PostCommentsContext(
+                        ownerId: p.ownerId ?? p.fromId ?? 0,
+                        postId: p.id,
+                        totalCount: p.commentsCount
+                    )
+                }
+            )
+        }
+        VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil; videoPlayerPost = nil }, postContext: ctx)
     }
 
     private var mainContentStack: some View {
@@ -404,6 +461,30 @@ enum FeedLoadState {
     var isLoading: Bool {
         if case .loading = self { return true }
         return false
+    }
+}
+
+// MARK: - Заглушки табов «Друзья» и «Сообщения»
+
+private struct FriendsStubView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "Друзья",
+            systemImage: "person.2",
+            description: Text("Раздел в разработке. Список друзей доступен во вкладке «Профиль».")
+        )
+        .navigationTitle("Друзья")
+    }
+}
+
+private struct MessagesStubView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "Сообщения",
+            systemImage: "bubble.left.and.bubble.right",
+            description: Text("Раздел в разработке.")
+        )
+        .navigationTitle("Сообщения")
     }
 }
 

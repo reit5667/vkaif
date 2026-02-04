@@ -8,7 +8,7 @@ struct ProfileView: View {
     @ObservedObject var viewModel: ProfileViewModel
     private var userId: Int? { viewModel.userId }
 
-    @State private var selectedTab: ProfileTab = .photo
+    @State private var selectedTab: ProfileTab = .wall
     @State private var isAvatarFullScreenPresented = false
 
     init(authService: AuthService, viewModel: ProfileViewModel) {
@@ -17,6 +17,7 @@ struct ProfileView: View {
     }
 
     private enum ProfileTab: String, CaseIterable {
+        case wall = "Стена"
         case photo = "Фото"
         case friends = "Друзья"
         case groups = "Группы"
@@ -24,7 +25,7 @@ struct ProfileView: View {
 
     /// Группы — только у текущего пользователя; у друга вкладку не показываем.
     private var availableTabs: [ProfileTab] {
-        userId == nil ? ProfileTab.allCases : [.photo, .friends]
+        userId == nil ? ProfileTab.allCases : [.wall, .photo, .friends]
     }
 
     var body: some View {
@@ -95,7 +96,7 @@ struct ProfileView: View {
         }
         .onAppear {
             if !availableTabs.contains(selectedTab) {
-                selectedTab = availableTabs.first ?? .photo
+                selectedTab = availableTabs.first ?? .wall
             }
         }
     }
@@ -108,6 +109,14 @@ struct ProfileView: View {
     @ViewBuilder
     private func tabContent(user: VKUserDetail) -> some View {
         switch selectedTab {
+        case .wall:
+            ProfileWallTabView(
+                posts: viewModel.wallPosts,
+                loadState: viewModel.wallLoadState,
+                user: user,
+                authService: authService,
+                onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) }
+            )
         case .photo:
             ProfilePhotoTabView(
                 albums: viewModel.albums,
@@ -136,6 +145,8 @@ struct ProfileView: View {
     /// Подгрузить данные вкладки при переключении (второй шанс, если при первой загрузке не обновилось).
     private func loadTabIfNeeded(tab: ProfileTab, user: VKUserDetail) {
         switch tab {
+        case .wall:
+            Task { await viewModel.loadWall(ownerId: user.id, forceRefresh: false) }
         case .photo:
             Task { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: false) }
         case .friends:

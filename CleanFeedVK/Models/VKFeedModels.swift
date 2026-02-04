@@ -259,6 +259,7 @@ struct VKAttachment: Decodable {
     let video: VKVideo?
     let link: VKLink?
     let doc: VKDoc?
+    let poll: VKPoll?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -266,6 +267,7 @@ struct VKAttachment: Decodable {
         case video
         case link
         case doc
+        case poll
     }
 
     init(from decoder: Decoder) throws {
@@ -275,7 +277,42 @@ struct VKAttachment: Decodable {
         video = try c.decodeIfPresent(VKVideo.self, forKey: .video)
         link = try c.decodeIfPresent(VKLink.self, forKey: .link)
         doc = try c.decodeIfPresent(VKDoc.self, forKey: .doc)
+        poll = try c.decodeIfPresent(VKPoll.self, forKey: .poll)
     }
+}
+
+/// Опрос во вложении поста (type=poll).
+struct VKPoll: Decodable {
+    let id: Int
+    let ownerId: Int?
+    let question: String?
+    let created: Int?
+    let votes: Int?
+    let answers: [VKPollAnswer]?
+    let anonymous: Bool?
+    let multiple: Bool?
+    let endDate: Int?
+    let closed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
+        case question
+        case created
+        case votes
+        case answers
+        case anonymous
+        case multiple
+        case endDate = "end_date"
+        case closed
+    }
+}
+
+struct VKPollAnswer: Decodable {
+    let id: Int
+    let text: String?
+    let votes: Int?
+    let rate: Double?
 }
 
 /// Лайки фото (photos.get возвращает в каждом фото).
@@ -299,55 +336,167 @@ struct VKPhoto: Decodable {
     let sizes: [VKPhotoSize]?
     let likes: VKPhotoLikes?
     let comments: VKPhotoComments?
+    /// Legacy (VK может отдавать фото без sizes, но с photo_75, photo_604 и т.д.).
+    let photo75: String?
+    let photo130: String?
+    let photo604: String?
+    let photo807: String?
+    let photo1280: String?
+    let photo2560: String?
 
-    /// URL для отображения: приоритет размеров (x→m→s и w,z,y,r,q,p,o) → первый доступный.
+    enum CodingKeys: String, CodingKey {
+        case id
+        case sizes
+        case likes
+        case comments
+        case photo75 = "photo_75"
+        case photo130 = "photo_130"
+        case photo604 = "photo_604"
+        case photo807 = "photo_807"
+        case photo1280 = "photo_1280"
+        case photo2560 = "photo_2560"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        sizes = try c.decodeIfPresent([VKPhotoSize].self, forKey: .sizes)
+        likes = try c.decodeIfPresent(VKPhotoLikes.self, forKey: .likes)
+        comments = try c.decodeIfPresent(VKPhotoComments.self, forKey: .comments)
+        photo75 = try c.decodeIfPresent(String.self, forKey: .photo75)
+        photo130 = try c.decodeIfPresent(String.self, forKey: .photo130)
+        photo604 = try c.decodeIfPresent(String.self, forKey: .photo604)
+        photo807 = try c.decodeIfPresent(String.self, forKey: .photo807)
+        photo1280 = try c.decodeIfPresent(String.self, forKey: .photo1280)
+        photo2560 = try c.decodeIfPresent(String.self, forKey: .photo2560)
+    }
+
+    private func urlFromSizes(order: [String]) -> String? {
+        guard let sizes = sizes, !sizes.isEmpty else { return nil }
+        for type in order {
+            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url, !url.isEmpty {
+                return url
+            }
+        }
+        return sizes.first(where: { $0.url != nil && !($0.url ?? "").isEmpty })?.url
+    }
+
+    private var legacyDisplayURL: String? {
+        photo2560 ?? photo1280 ?? photo807 ?? photo604 ?? photo130 ?? photo75
+    }
+
+    /// URL для отображения: sizes (x→m→s…) или legacy (photo_604 → photo_130 → …).
     var displayURL: String? {
-        guard let sizes = sizes, !sizes.isEmpty else { return nil }
-        let order = ["x", "m", "s", "w", "z", "y", "r", "q", "p", "o"]
-        for type in order {
-            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
-                return url
-            }
-        }
-        return sizes.first?.url
+        urlFromSizes(order: ["x", "m", "s", "w", "z", "y", "r", "q", "p", "o"])
+            ?? legacyDisplayURL
     }
 
-    /// URL для превью (сетка/лента): приоритет мелких размеров — альбомы, много фото в посте.
+    /// URL для превью (сетка/лента): приоритет мелких размеров; иначе legacy.
     var thumbnailDisplayURL: String? {
-        guard let sizes = sizes, !sizes.isEmpty else { return nil }
-        let order = ["s", "m", "q", "p", "x", "o", "r", "y", "z", "w"]
-        for type in order {
-            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
-                return url
-            }
-        }
-        return sizes.first?.url
+        urlFromSizes(order: ["s", "m", "q", "p", "x", "o", "r", "y", "z", "w"])
+            ?? photo130 ?? photo75 ?? photo604 ?? photo807 ?? photo1280 ?? photo2560
     }
 
-    /// URL для превью в ленте: приоритет средних размеров (m,x,y,z,w) — приемлемое качество при одной картинке в посте.
+    /// URL для превью в ленте: приоритет средних размеров (m,x,y,z,w); иначе legacy.
     var feedPreviewURL: String? {
-        guard let sizes = sizes, !sizes.isEmpty else { return nil }
-        let order = ["m", "x", "y", "z", "w", "r", "q", "p", "s", "o"]
-        for type in order {
-            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url {
-                return url
-            }
-        }
-        return sizes.first?.url
+        urlFromSizes(order: ["m", "x", "y", "z", "w", "r", "q", "p", "s", "o"])
+            ?? photo604 ?? photo807 ?? photo130 ?? photo75 ?? photo1280 ?? photo2560
     }
 }
 
 struct VKPhotoSize: Decodable {
     let type: String?
-    let url: String
     let width: Int?
     let height: Int?
+    /// VK отдаёт "url"; в части ответов может быть "src".
+    var url: String? { urlValue ?? srcValue }
+    private let urlValue: String?
+    private let srcValue: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case width
+        case height
+        case urlValue = "url"
+        case srcValue = "src"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decodeIfPresent(String.self, forKey: .type)
+        width = try c.decodeIfPresent(Int.self, forKey: .width)
+        height = try c.decodeIfPresent(Int.self, forKey: .height)
+        urlValue = try c.decodeIfPresent(String.self, forKey: .urlValue)
+        srcValue = try c.decodeIfPresent(String.self, forKey: .srcValue)
+    }
+}
+
+/// Элемент превью видео (image): url или src, размеры.
+struct VKVideoImage: Decodable {
+    let width: Int?
+    let height: Int?
+    private let urlValue: String?
+    private let srcValue: String?
+
+    enum CodingKeys: String, CodingKey {
+        case width
+        case height
+        case urlValue = "url"
+        case srcValue = "src"
+    }
+
+    var imageURL: String? { (urlValue ?? srcValue).flatMap { $0.isEmpty ? nil : $0 } }
 }
 
 struct VKVideo: Decodable {
     let id: Int
+    /// Владелец видео (положительный — пользователь, отрицательный — группа). Нужен для video.get и плеера.
+    let ownerId: Int?
     let title: String?
     let duration: Int?
+    /// Превью: массив размеров (в ленте VK может отдавать не всегда).
+    let image: [VKVideoImage]?
+    /// Превью: первый кадр 320px (часто есть во вложении).
+    let firstFrame320: String?
+    let firstFrame160: String?
+    /// URL встраиваемого плеера (для WKWebView). Может отсутствовать в кратком вложении — тогда нужен video.get.
+    let player: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
+        case title
+        case duration
+        case image
+        case firstFrame320 = "first_frame_320"
+        case firstFrame160 = "first_frame_160"
+        case player
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        ownerId = try c.decodeIfPresent(Int.self, forKey: .ownerId)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        duration = try c.decodeIfPresent(Int.self, forKey: .duration)
+        image = try c.decodeIfPresent([VKVideoImage].self, forKey: .image)
+        firstFrame320 = try c.decodeIfPresent(String.self, forKey: .firstFrame320)
+        firstFrame160 = try c.decodeIfPresent(String.self, forKey: .firstFrame160)
+        player = try c.decodeIfPresent(String.self, forKey: .player)
+    }
+
+    /// URL превью для отображения в ленте: first_frame_320 → first_frame_160 → первый image → nil (тогда нужен video.get).
+    var previewImageURL: String? {
+        if let u = firstFrame320, !u.isEmpty { return u }
+        if let u = firstFrame160, !u.isEmpty { return u }
+        return image?.first(where: { ($0.imageURL ?? "").isEmpty == false })?.imageURL
+    }
+
+    /// Идентификатор для video.get: "owner_id+video_id" (плюс в VK — подчёркивание).
+    func videoGetId(ownerFallback: Int) -> String {
+        let oid = ownerId ?? ownerFallback
+        return "\(oid)_\(id)"
+    }
 }
 
 struct VKLink: Decodable {
@@ -465,6 +614,17 @@ struct PhotosGetResponse: Decodable {
     let items: [VKPhoto]
 }
 
+/// Ответ photos.copy — новое фото в «Сохранённых» (owner_id текущего пользователя, id нового фото).
+struct PhotosCopyResponse: Decodable {
+    let id: Int
+    let ownerId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
+    }
+}
+
 // MARK: - friends.get
 
 struct FriendsGetResponse: Decodable {
@@ -491,9 +651,30 @@ struct VKFriend: Decodable {
     }
 }
 
+// MARK: - friends.getRequests (items — id пользователей)
+
+struct FriendsGetRequestsResponse: Decodable {
+    let count: Int
+    let items: [Int]
+}
+
+// MARK: - friends.getSuggestions (items — id возможных друзей)
+
+struct FriendsGetSuggestionsResponse: Decodable {
+    let count: Int
+    let items: [VKFriend]
+}
+
 // MARK: - groups.get
 
 struct GroupsGetResponse: Decodable {
     let count: Int
     let items: [VKGroup]
+}
+
+// MARK: - video.get
+
+struct VideoGetResponse: Decodable {
+    let count: Int
+    let items: [VKVideo]
 }

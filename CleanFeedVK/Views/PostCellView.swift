@@ -22,12 +22,14 @@ struct PostCellView: View {
     var onLike: (() -> Void)? = nil
     /// true = запрос лайка в процессе, кнопку не нажимать.
     var likeInProgress: Bool = false
+    /// Тап по видео → загрузка player URL и открытие плеера. Передаётся пост для панели лайков/комментариев.
+    var onTapVideo: ((VKVideo, Int, VKPost) async -> Void)? = nil
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
     private let textLineLimitCollapsed = 3
 
-    /// URL фото для превью в сетке ленты (приоритет средних размеров m,x — нормальное качество при одной картинке).
+    /// URL фото для превью: приоритет feedPreviewURL (меньше трафика), fallback на displayURL для надёжности.
     private var photoThumbnailURLs: [String] {
         guard let attachments = post.attachments else { return [] }
         return attachments.compactMap { p in p.photo?.feedPreviewURL ?? p.photo?.displayURL }
@@ -42,6 +44,32 @@ struct PostCellView: View {
     private var photoThumbnailURLsAsURLs: [URL] { photoThumbnailURLs.compactMap { URL(string: $0) } }
     private var photoDisplayURLsAsURLs: [URL] { photoDisplayURLs.compactMap { URL(string: $0) } }
 
+    /// Видео из вложений поста с ownerId для плеера/video.get.
+    private var videoAttachments: [(video: VKVideo, ownerId: Int)] {
+        let owner = post.ownerId ?? post.fromId ?? 0
+        return (post.attachments ?? [])
+            .compactMap { att -> (VKVideo, Int)? in
+                guard let v = att.video else { return nil }
+                return (v, owner)
+            }
+    }
+
+    private var linkAttachments: [VKLink] {
+        (post.attachments ?? []).compactMap { $0.link }
+    }
+
+    private var pollAttachments: [VKPoll] {
+        (post.attachments ?? []).compactMap { $0.poll }
+    }
+
+    /// Есть вложения, которые не фото/видео/ссылка/опрос — показываем плейсхолдер (doc и т.д.).
+    private var hasOtherMedia: Bool {
+        guard let attachments = post.attachments else { return false }
+        return attachments.contains { att in
+            att.photo == nil && att.video == nil && att.link == nil && att.poll == nil && att.doc != nil
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
@@ -50,7 +78,17 @@ struct PostCellView: View {
             }
             if !photoThumbnailURLs.isEmpty {
                 photoGridView
-            } else if hasNonPhotoMedia {
+            }
+            if !videoAttachments.isEmpty {
+                videoRow
+            }
+            if !linkAttachments.isEmpty {
+                linkRow
+            }
+            if !pollAttachments.isEmpty {
+                pollRow
+            }
+            if hasOtherMedia {
                 mediaPlaceholder
             }
             if displayLikesCount > 0 || onLike != nil || post.commentsCount > 0 || onTapComments != nil {
@@ -164,10 +202,6 @@ struct PostCellView: View {
 
     // MARK: - Media
 
-    private var hasNonPhotoMedia: Bool {
-        guard let attachments = post.attachments else { return false }
-        return attachments.contains { $0.video != nil || $0.link != nil }
-    }
 
     /// Сетка фото: 1 — во всю ширину, 2 — два столбца, 3+ — до 3 столбцов.
     private var photoGridView: some View {
@@ -205,11 +239,172 @@ struct PostCellView: View {
         }
     }
 
+    /// Строка видео: превью или плейсхолдер, тап → onTapVideo (плеер). Сетка по центру.
+    @ViewBuilder
+    private var videoRow: some View {
+        let count = videoAttachments.count
+        let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        let grid = LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(videoAttachments.enumerated()), id: \.offset) { _, pair in
+                videoCard(video: pair.video, ownerId: pair.ownerId)
+            }
+        }
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            grid
+                .frame(maxWidth: count <= 2 ? (count == 1 ? 180 : 280) : nil)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func videoCard(video: VKVideo, ownerId: Int) -> some View {
+        let previewURL = video.previewImageURL
+        return Button {
+            Task { await onTapVideo?(video, ownerId, post) }
+        } label: {
+            ZStack(alignment: .center) {
+                if let urlString = previewURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .failure, .empty:
+                            videoPlaceholderContent(duration: video.duration)
+                        @unknown default:
+                            videoPlaceholderContent(duration: video.duration)
+                        }
+                    }
+                } else {
+                    videoPlaceholderContent(duration: video.duration)
+                }
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+            }
+            .frame(height: 160)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .disabled(onTapVideo == nil)
+    }
+
+    private func videoPlaceholderContent(duration: Int?) -> some View {
+        VStack(spacing: 4) {
+            if let sec = duration {
+                Text(formatDuration(sec))
+                    .font(.caption)
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGray4))
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        if m > 0 {
+            return String(format: "%d:%02d", m, s)
+        }
+        return "0:\(String(format: "%02d", s))"
+    }
+
+    /// Ссылки: заголовок/URL, тап → Safari.
+    private var linkRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(linkAttachments.enumerated()), id: \.offset) { _, link in
+                if let url = URL(string: link.url) {
+                    Button {
+                        UIApplication.shared.open(url)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "link")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                if let t = link.title, !t.isEmpty {
+                                    Text(t)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(2)
+                                }
+                                Text(link.url)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(10)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Опросы: вопрос и варианты ответов (только отображение).
+    private var pollRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(pollAttachments.enumerated()), id: \.offset) { _, poll in
+                VStack(alignment: .leading, spacing: 6) {
+                    if let q = poll.question, !q.isEmpty {
+                        Text(q)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    if let answers = poll.answers, !answers.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(answers, id: \.id) { a in
+                                HStack(spacing: 8) {
+                                    Text(a.text ?? "")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                    if let v = a.votes {
+                                        Text("\(v)")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(6)
+                            }
+                        }
+                    }
+                    if let votes = poll.votes {
+                        Text("Всего голосов: \(votes)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+            }
+        }
+    }
+
     private var mediaPlaceholder: some View {
         HStack {
-            Image(systemName: "photo.on.rectangle.angled")
+            Image(systemName: "doc")
                 .foregroundColor(.secondary)
-            Text("Видео / ссылка")
+            Text("Документ")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

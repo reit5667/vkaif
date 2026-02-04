@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Элемент для fullScreenCover: индекс фото + уникальный id (чтобы повторный тап по той же картинке снова открывал).
+private struct AlbumFullScreenItem: Identifiable {
+    let index: Int
+    let id = UUID()
+}
+
 /// Фото альбома (photos.get): сетка, тап — полноэкран; подгрузка +50 при достижении низа; сортировка по дате.
 struct AlbumPhotosView: View {
     @Environment(\.dismiss) private var dismiss
@@ -12,8 +18,8 @@ struct AlbumPhotosView: View {
     @State private var totalCount: Int = 0
     @State private var loadState: AlbumPhotosLoadState = .idle
     @State private var loadMoreState: AlbumPhotosLoadState = .idle
-    @State private var fullScreenInitialIndex: Int = 0
-    @State private var isFullScreenPresented = false
+    /// Индекс фото для fullscreen; nil = не показывать. Item-based, чтобы при первом тапе открывалась нужная картинка.
+    @State private var fullScreenPhotoItem: AlbumFullScreenItem? = nil
     /// true = сначала новые (rev=1), false = сначала старые (rev=0).
     @State private var sortNewestFirst = true
     /// Переопределения лайков после likes.add/delete по фото (photoId -> count / liked).
@@ -24,10 +30,20 @@ struct AlbumPhotosView: View {
     private let vkApi = VKApiService()
     private let pageSize = 50
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
+    /// Примерная высота одной ячейки (квадрат) для расчёта spacer внизу — чтобы скролл имел «запас» под ещё не подгруженные фото.
+    private let estimatedCellHeight: CGFloat = 120
 
     private var rev: Int { sortNewestFirst ? 1 : 0 }
     private var canLoadMore: Bool {
         loadState == .loaded && loadMoreState != .loading && photos.count < totalCount
+    }
+
+    /// Высота spacer внизу сетки = сколько ещё строк фото не подгружено (чтобы контент ScrollView имел запас и скролл опускался).
+    private var albumBottomSpacerHeight: CGFloat {
+        let remaining = max(0, totalCount - photos.count)
+        guard remaining > 0 else { return 0 }
+        let rows = ceil(Double(remaining) / Double(columns.count))
+        return CGFloat(rows) * estimatedCellHeight
     }
 
     var body: some View {
@@ -43,15 +59,22 @@ struct AlbumPhotosView: View {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 4) {
                             ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
-                                photoCell(photo)
-                                    .onAppear {
-                                        if index == photos.count - 1 { loadMoreIfNeeded() }
-                                    }
+                                photoCell(photo, index: index)
+                            }
+                            if canLoadMore {
+                                Color.clear
+                                    .frame(height: 1)
+                                    .onAppear { loadMoreIfNeeded() }
                             }
                             if loadMoreState == .loading {
                                 ProgressView()
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
+                            }
+                            // Spacer внизу: резервируем высоту под ещё не подгруженные фото, чтобы скролл мог опускаться и триггер onAppear срабатывал.
+                            if photos.count < totalCount {
+                                Color.clear
+                                    .frame(height: albumBottomSpacerHeight)
                             }
                         }
                         .padding(4)
@@ -85,15 +108,15 @@ struct AlbumPhotosView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $isFullScreenPresented) {
+        .fullScreenCover(item: $fullScreenPhotoItem) { item in
             let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
-            let idx = min(fullScreenInitialIndex, photos.count - 1)
+            let idx = min(item.index, photos.count - 1)
             let photo = photos.indices.contains(idx) ? photos[idx] : nil
             if !urls.isEmpty {
                 FullScreenPhotoGalleryView(
                     urls: urls,
-                    initialIndex: min(fullScreenInitialIndex, urls.count - 1),
-                    onDismiss: { isFullScreenPresented = false },
+                    initialIndex: min(item.index, urls.count - 1),
+                    onDismiss: { fullScreenPhotoItem = nil },
                     likesCount: photo.map { photoLikeOverrides[$0.id] ?? $0.likes?.count ?? 0 } ?? 0,
                     commentsCount: photo.map { $0.comments?.count ?? 0 } ?? 0,
                     isLiked: photo.map { photoLikedOverrides[$0.id] ?? ($0.likes?.userLikes == 1) } ?? false,
@@ -101,14 +124,22 @@ struct AlbumPhotosView: View {
                         photoLikeInProgress.contains(p.id) ? nil : { likeTogglePhoto(photoId: p.id) }
                     } ?? nil,
                     photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
-                    authService: authService
+                    authService: authService,
+                    photoIdsForSaving: photos.map { (ownerId, $0.id) },
+                    onAddToSaved: { oid, pid in
+                        guard let token = authService.accessToken else { return false }
+                        do {
+                            _ = try await vkApi.photosCopy(token: token, ownerId: oid, photoId: pid)
+                            return true
+                        } catch { return false }
+                    }
                 )
             }
         }
         .onAppear { loadPhotos(offset: 0, append: false) }
     }
 
-    private func photoCell(_ photo: VKPhoto) -> some View {
+    private func photoCell(_ photo: VKPhoto, index: Int) -> some View {
         Group {
             if let urlString = photo.thumbnailDisplayURL ?? photo.displayURL, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
@@ -136,10 +167,7 @@ struct AlbumPhotosView: View {
             }
         }
         .onTapGesture {
-            if let idx = photos.firstIndex(where: { $0.id == photo.id }) {
-                fullScreenInitialIndex = idx
-                isFullScreenPresented = true
-            }
+            fullScreenPhotoItem = AlbumFullScreenItem(index: index)
         }
     }
 
@@ -164,9 +192,15 @@ struct AlbumPhotosView: View {
                     if append {
                         photos.append(contentsOf: response.items)
                         loadMoreState = .idle
+                        if response.items.count >= pageSize {
+                            totalCount = max(totalCount, photos.count + 1)
+                        }
                     } else {
                         photos = response.items
                         totalCount = response.count
+                        if response.items.count >= pageSize && response.count <= response.items.count {
+                            totalCount = max(response.count, response.items.count + 1)
+                        }
                         loadState = .loaded
                     }
                 }

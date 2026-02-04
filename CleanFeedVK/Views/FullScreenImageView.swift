@@ -67,9 +67,15 @@ struct FullScreenPhotoGalleryView: View {
     /// Контекст комментариев к фото (альбом) — sheet показывается из галереи.
     var photoCommentsContext: PhotoCommentsContext? = nil
     var authService: AuthService? = nil
+    /// Для «Добавить в сохранённые»: массив (owner_id, photo_id) в том же порядке, что и urls. nil — пункт скрыт/неактивен.
+    var photoIdsForSaving: [(ownerId: Int, photoId: Int)]? = nil
+    /// Вызов при тапе «Добавить в сохранённые». (ownerId, photoId) — текущее фото. Возвращает true при успехе.
+    var onAddToSaved: ((Int, Int) async -> Bool)? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
+    @State private var addToSavedInProgress = false
+    @State private var addToSavedDone = false
     /// Локальное переопределение после тапа «Нравится» до закрытия галереи.
     @State private var likedOverride: Bool? = nil
     @State private var presentedPostComments: PostCommentsContext? = nil
@@ -86,7 +92,9 @@ struct FullScreenPhotoGalleryView: View {
         onTapComments: (() -> Void)? = nil,
         postCommentsContext: PostCommentsContext? = nil,
         photoCommentsContext: PhotoCommentsContext? = nil,
-        authService: AuthService? = nil
+        authService: AuthService? = nil,
+        photoIdsForSaving: [(ownerId: Int, photoId: Int)]? = nil,
+        onAddToSaved: ((Int, Int) async -> Bool)? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -99,6 +107,8 @@ struct FullScreenPhotoGalleryView: View {
         self.postCommentsContext = postCommentsContext
         self.photoCommentsContext = photoCommentsContext
         self.authService = authService
+        self.photoIdsForSaving = photoIdsForSaving
+        self.onAddToSaved = onAddToSaved
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
     }
 
@@ -224,11 +234,21 @@ struct FullScreenPhotoGalleryView: View {
             Spacer(minLength: 0)
             Menu {
                 Button {
-                    // TODO: добавить в альбом (photos.copy или аналог)
+                    if let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone {
+                        let pair = ids[currentIndex]
+                        addToSavedInProgress = true
+                        Task {
+                            let ok = await save(pair.ownerId, pair.photoId)
+                            await MainActor.run {
+                                addToSavedInProgress = false
+                                if ok { addToSavedDone = true }
+                            }
+                        }
+                    }
                 } label: {
-                    Label("Добавить в альбом", systemImage: "square.and.arrow.down")
+                    Label(addToSavedDone ? "Добавлено в сохранённые" : "Добавить в сохранённые", systemImage: "square.and.arrow.down")
                 }
-                .disabled(true)
+                .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || onAddToSaved == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
                 Divider()
                 Button("Закрыть") { onDismiss() }
             } label: {
