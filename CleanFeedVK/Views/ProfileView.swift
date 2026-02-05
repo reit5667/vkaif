@@ -117,6 +117,8 @@ struct ProfileView: View {
                 loadState: viewModel.wallLoadState,
                 user: user,
                 authService: authService,
+                isOwnProfile: userId == nil,
+                onDeletePost: { viewModel.removeWallPost($0) },
                 onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) }
             )
         case .photo:

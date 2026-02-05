@@ -50,6 +50,14 @@ struct PostCellView: View {
     var onRepostToDM: (() -> Void)? = nil
     /// true = запрос репоста в процессе.
     var repostInProgress: Bool = false
+    /// Показывать меню поста с «Удалить» (свой пост). false или onDelete == nil — меню не показывается.
+    var canDeletePost: Bool = false
+    /// Тап «Удалить» в меню поста. nil = пункт не показывать.
+    var onDelete: (() -> Void)? = nil
+    /// true = запрос удаления в процессе (кнопку не нажимать).
+    var deleteInProgress: Bool = false
+    /// Удалить фото в fullscreen галерее (свои фото). (token, ownerId, photoId) → true при успехе. nil = пункт не показывать.
+    var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
@@ -111,6 +119,16 @@ struct PostCellView: View {
     }
 
     var body: some View {
+        postBodyContent
+            .fullScreenCover(isPresented: Binding(
+                get: { fullScreenPhotoIndex != nil },
+                set: { if !$0 { fullScreenPhotoIndex = nil } }
+            )) {
+                fullScreenGalleryContent
+            }
+    }
+
+    private var postBodyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if !post.text.isEmpty {
@@ -141,32 +159,45 @@ struct PostCellView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .fullScreenCover(isPresented: Binding(
-            get: { fullScreenPhotoIndex != nil },
-            set: { if !$0 { fullScreenPhotoIndex = nil } }
-        )) {
-            if let idx = fullScreenPhotoIndex, !photoDisplayURLsAsURLs.isEmpty {
-                let ownerId = post.ownerId ?? post.fromId ?? 0
-                FullScreenPhotoGalleryView(
-                    urls: photoDisplayURLsAsURLs,
-                    initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
-                    onDismiss: { fullScreenPhotoIndex = nil },
-                    likesCount: displayLikesCount,
-                    commentsCount: post.commentsCount,
-                    isLiked: displayIsLiked,
-                    onLike: likeInProgress ? nil : onLike,
-                    onTapComments: onTapComments,
-                    postCommentsContext: (onTapComments != nil && authService != nil)
-                        ? PostCommentsContext(ownerId: ownerId, postId: post.id, totalCount: post.commentsCount)
-                        : nil,
-                    authService: authService,
-                    photoIdsForSaving: photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost,
-                    onAddToSaved: onAddToSaved,
-                    getAccessToken: getAccessToken,
-                    initialAccessToken: getAccessToken?() ?? ""
-                )
-            }
+    }
+
+    @ViewBuilder
+    private var fullScreenGalleryContent: some View {
+        if let idx = fullScreenPhotoIndex, !photoDisplayURLsAsURLs.isEmpty {
+            AnyView(fullScreenGalleryView(initialIndex: idx))
         }
+    }
+
+    private func fullScreenGalleryView(initialIndex idx: Int) -> FullScreenPhotoGalleryView {
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        let onLikeAction: (() -> Void)? = likeInProgress ? nil : onLike
+        let postContext: PostCommentsContext? = (onTapComments != nil && authService != nil)
+            ? PostCommentsContext(ownerId: ownerId, postId: post.id, totalCount: post.commentsCount)
+            : nil
+        let addToSaved: ((String, Int, Int, String?) async -> Bool)? = canDeletePost
+            ? nil as ((String, Int, Int, String?) async -> Bool)?
+            : onAddToSaved
+        let deletePhoto: ((String, Int, Int) async -> Bool)? = canDeletePost
+            ? onDeletePhoto
+            : nil as ((String, Int, Int) async -> Bool)?
+        return FullScreenPhotoGalleryView(
+            urls: photoDisplayURLsAsURLs,
+            initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
+            onDismiss: { fullScreenPhotoIndex = nil },
+            likesCount: displayLikesCount,
+            commentsCount: post.commentsCount,
+            isLiked: displayIsLiked,
+            onLike: onLikeAction,
+            onTapComments: onTapComments,
+            postCommentsContext: postContext,
+            authService: authService,
+            photoIdsForSaving: photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost,
+            onAddToSaved: addToSaved,
+            getAccessToken: getAccessToken,
+            initialAccessToken: getAccessToken?() ?? "",
+            isOwnPhotos: canDeletePost,
+            onDeletePhoto: deletePhoto
+        )
     }
 
     // MARK: - Header (тап → группа или профиль, если передан feedDestination)
@@ -183,6 +214,19 @@ struct PostCellView: View {
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 0)
+            if canDeletePost, onDelete != nil {
+                Menu {
+                    Button(role: .destructive, action: { onDelete?() }) {
+                        Label("Удалить", systemImage: "trash")
+                    }
+                    .disabled(deleteInProgress)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+                .disabled(deleteInProgress)
+            }
         }
     }
 

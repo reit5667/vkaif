@@ -141,55 +141,57 @@ struct GroupWallView: View {
         let repostCount = postRepostOverrides[post.postId]
         let repostLoading = repostInProgress.contains(post.postId)
         let repostToWallAction: (() -> Void)? = repostLoading ? nil : { repostToWall(post) }
-        return PostCellView(
-            post: post,
-            authorName: group?.name ?? "Группа",
-            authorAvatarURL: group?.photo50,
-            relativeDate: relativeDateString(from: post.date),
-            profiles: profiles,
-            groups: groups,
-            authService: nil,
-            feedDestination: nil,
-            onTapComments: {
-                commentsContext = PostCommentsContext(
-                    ownerId: post.ownerId ?? ownerId,
-                    postId: post.id,
-                    totalCount: post.commentsCount
-                )
-            },
-            likesCountOverride: postLikeOverrides[post.postId],
-            isLikedOverride: postLikedOverrides[post.postId],
-            onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-            likeInProgress: likeInProgress.contains(post.postId),
-            onTapVideo: { video, ownerId, post in
-                var url: URL?
-                if let p = video.player, let u = URL(string: p) {
-                    url = u
-                } else {
-                    let token = await MainActor.run { authService.accessToken } ?? ""
-                    if !token.isEmpty,
-                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
-                       let first = res.items.first,
-                       let playerURL = first.player {
-                        url = URL(string: playerURL)
+        return Group {
+            PostCellView(
+                post: post,
+                authorName: group?.name ?? "Группа",
+                authorAvatarURL: group?.photo50,
+                relativeDate: relativeDateString(from: post.date),
+                profiles: profiles,
+                groups: groups,
+                authService: nil,
+                feedDestination: nil,
+                onTapComments: {
+                    commentsContext = PostCommentsContext(
+                        ownerId: post.ownerId ?? ownerId,
+                        postId: post.id,
+                        totalCount: post.commentsCount
+                    )
+                },
+                likesCountOverride: postLikeOverrides[post.postId],
+                isLikedOverride: postLikedOverrides[post.postId],
+                onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+                likeInProgress: likeInProgress.contains(post.postId),
+                onTapVideo: { video, ownerId, post in
+                    var url: URL?
+                    if let p = video.player, let u = URL(string: p) {
+                        url = u
+                    } else {
+                        let token = await MainActor.run { authService.accessToken } ?? ""
+                        if !token.isEmpty,
+                           let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                           let first = res.items.first,
+                           let playerURL = first.player {
+                            url = URL(string: playerURL)
+                        }
                     }
-                }
-                await MainActor.run {
-                    videoPlayerURL = url
-                    videoPlayerPost = post
-                }
-            },
-            pollVoteOverrides: nil,
-            onPollVote: nil,
-            pollVoteInProgress: [],
-            repostsCountOverride: repostCount,
-            onRepostToWall: repostToWallAction,
-            onRepostToDM: { showRepostDMStub = true },
-            repostInProgress: repostLoading,
-            onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
-            getAccessToken: { authService.accessToken ?? "" }
-        )
-        .padding(.vertical, 8)
+                    await MainActor.run {
+                        videoPlayerURL = url
+                        videoPlayerPost = post
+                    }
+                },
+                pollVoteOverrides: nil,
+                onPollVote: nil,
+                pollVoteInProgress: [],
+                repostsCountOverride: repostCount,
+                onRepostToWall: repostToWallAction,
+                onRepostToDM: { showRepostDMStub = true },
+                repostInProgress: repostLoading,
+                onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
+                getAccessToken: { authService.accessToken ?? "" }
+            )
+        }
+        .padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
     }
 
     private func load() {

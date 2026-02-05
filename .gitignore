@@ -1,2 +1,8 @@
-CleanFeedVK.xcodeproj/project.xcworkspace/xcuserdata/vsharavin.xcuserdatad/UserInterfaceState.xcuserstate
-CleanFeedVK.xcodeproj/project.xcworkspace/xcuserdata/vsharavin.xcuserdatad/UserInterfaceState.xcuserstate
+# Xcode
+CleanFeedVK.xcodeproj/
+
+# md files
+NEW_DIALOG_MESSAGE.md
+PROJECT_STATUS_ARCHIVE.md
+PROJECT_STATUS.md
+TECHNICAL_NOTES.md

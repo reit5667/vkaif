@@ -497,6 +497,31 @@ final class VKApiService: Sendable {
         return response
     }
 
+    // MARK: - photos.delete
+
+    /// Удалить фото. owner_id — владелец (пользователь или -groupId), photo_id — id фото. Возвращает 1 при успехе.
+    func photosDelete(
+        token: String,
+        ownerId: Int,
+        photoId: Int
+    ) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "photo_id", value: String(photoId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.delete") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "photos.delete ownerId=\(ownerId) photoId=\(photoId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "photos.delete ok")
+    }
+
     // MARK: - video.get
 
     /// Получить видео по идентификатору "owner_id_video_id" (например "123_456"). Возвращает превью (image/first_frame) и player URL.
@@ -679,6 +704,32 @@ final class VKApiService: Sendable {
         let response = try await requestVK(WallRepostResponse.self, from: request)
         logger?.info("VKApi", "wall.repost ok success=\(response.success) repostsCount=\(response.repostsCount ?? -1)")
         return response
+    }
+
+    // MARK: - wall.delete
+
+    /// Удалить пост со стены. owner_id — владелец стены (пользователь или -groupId), post_id — id поста.
+    /// Возвращает 1 при успехе.
+    func wallDelete(
+        token: String,
+        ownerId: Int,
+        postId: Int
+    ) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "post_id", value: String(postId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.delete") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.delete ownerId=\(ownerId) postId=\(postId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "wall.delete ok")
     }
 
     // MARK: - wall.createComment

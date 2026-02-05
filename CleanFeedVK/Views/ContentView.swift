@@ -39,6 +39,9 @@ struct ContentView: View {
     @State private var postRepostOverrides: [String: Int] = [:]
     @State private var repostInProgress: Set<String> = []
     @State private var showRepostDMStub = false
+    /// ID текущего пользователя (для показа «Удалить» только у своих постов). Заполняется при loadFeed.
+    @State private var currentUserId: Int? = nil
+    @State private var deleteInProgress: Set<String> = []
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -102,6 +105,8 @@ struct ContentView: View {
                     repostInProgress = []
                     pollVoteOverrides = [:]
                     pollVoteInProgress = []
+                    currentUserId = nil
+                    deleteInProgress = []
                 }
             }
         }
@@ -218,10 +223,46 @@ struct ContentView: View {
     }
 
     private func feedPostRow(_ post: VKPost) -> some View {
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        let isOwnPost = ownerId > 0 && currentUserId != nil && ownerId == currentUserId
         let repostCount = postRepostOverrides[post.postId]
         let repostLoading = repostInProgress.contains(post.postId)
         let repostToWallAction: (() -> Void)? = repostLoading ? nil : { repostToWall(post) }
-        return PostCellView(
+        let tapComments: () -> Void = {
+            commentsContext = PostCommentsContext(
+                ownerId: post.ownerId ?? post.fromId ?? 0,
+                postId: post.id,
+                totalCount: post.commentsCount
+            )
+        }
+        let likeAction: (() -> Void)? = likeInProgress.contains(post.postId) ? nil : { likeToggle(post) }
+        let tapVideo: (VKVideo, Int, VKPost) async -> Void = { video, ownerId, post in
+            var url: URL?
+            if let p = video.player, let u = URL(string: p) {
+                url = u
+            } else {
+                let token = await MainActor.run { authService.accessToken } ?? ""
+                if !token.isEmpty,
+                   let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                   let first = res.items.first,
+                   let playerURL = first.player {
+                    url = URL(string: playerURL)
+                }
+            }
+            await MainActor.run {
+                videoPlayerURL = url
+                videoPlayerPost = post
+            }
+        }
+        let onPollVoteAction: (VKPost, VKPoll, Int) -> Void = { p, poll, answerId in
+            pollVote(post: p, poll: poll, answerId: answerId)
+        }
+        let onDeleteAction: (() -> Void)? = isOwnPost ? { deletePost(post) } : nil
+        let deletePhotoClosure: (String, Int, Int) async -> Bool = { token, ownerId, photoId in
+            await deletePhotoFromPost(token: token, ownerId: ownerId, photoId: photoId)
+        }
+        let onDeletePhotoAction: ((String, Int, Int) async -> Bool)? = isOwnPost ? Optional(deletePhotoClosure) : nil
+        return FeedPostRowCell(
             post: post,
             authorName: authorName(for: post),
             authorAvatarURL: authorAvatarURL(for: post),
@@ -230,46 +271,57 @@ struct ContentView: View {
             groups: feedGroups,
             authService: authService,
             feedDestination: feedDestination(for: post),
-            onTapComments: {
-                commentsContext = PostCommentsContext(
-                    ownerId: post.ownerId ?? post.fromId ?? 0,
-                    postId: post.id,
-                    totalCount: post.commentsCount
-                )
-            },
+            onTapComments: tapComments,
             likesCountOverride: postLikeOverrides[post.postId],
             isLikedOverride: postLikedOverrides[post.postId],
-            onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
             likeInProgress: likeInProgress.contains(post.postId),
-            onTapVideo: { video, ownerId, post in
-                var url: URL?
-                if let p = video.player, let u = URL(string: p) {
-                    url = u
-                } else {
-                    let token = await MainActor.run { authService.accessToken } ?? ""
-                    if !token.isEmpty,
-                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
-                       let first = res.items.first,
-                       let playerURL = first.player {
-                        url = URL(string: playerURL)
-                    }
-                }
-                await MainActor.run {
-                    videoPlayerURL = url
-                    videoPlayerPost = post
-                }
-            },
+            onLike: likeAction,
+            onTapVideo: tapVideo,
             pollVoteOverrides: pollVoteOverrides,
-            onPollVote: { p, poll, answerId in pollVote(post: p, poll: poll, answerId: answerId) },
+            onPollVote: onPollVoteAction,
             pollVoteInProgress: pollVoteInProgress,
             repostsCountOverride: repostCount,
             onRepostToWall: repostToWallAction,
             onRepostToDM: { showRepostDMStub = true },
             repostInProgress: repostLoading,
-            onAddToSaved: { token, ownerId, photoId, accessKey in await addPhotoToSaved(token: token, ownerId: ownerId, photoId: photoId, accessKey: accessKey) },
+            canDeletePost: isOwnPost,
+            onDelete: onDeleteAction,
+            deleteInProgress: deleteInProgress.contains(post.postId),
+            onDeletePhoto: onDeletePhotoAction,
+            onAddToSaved: addPhotoToSaved,
             getAccessToken: { authService.accessToken ?? "" }
         )
-        .padding(.vertical, 8)
+    }
+
+    /// Удаление фото (photos.delete). Для своих постов из fullscreen галереи. Возвращает true при успехе.
+    private func deletePhotoFromPost(token: String, ownerId: Int, photoId: Int) async -> Bool {
+        do {
+            try await vkApi.photosDelete(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Удаление поста (wall.delete). При успехе пост убирается из ленты.
+    private func deletePost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let pid = post.postId
+        if deleteInProgress.contains(pid) { return }
+        deleteInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallDelete(token: token, ownerId: ownerId, postId: post.id)
+                await MainActor.run {
+                    feedPosts.removeAll { $0.postId == pid }
+                    deleteInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { deleteInProgress.remove(pid) }
+            }
+        }
     }
 
     // MARK: - Views
@@ -368,6 +420,11 @@ struct ContentView: View {
                 let filtered = feedFilter.filter(response.items)
                 if response.items.count != filtered.count {
                     print("[CleanFeedVK] Фильтр: было \(response.items.count), осталось \(filtered.count)")
+                }
+                if await MainActor.run(body: { currentUserId }) == nil,
+                   let users = try? await vkApi.getUsers(token: token),
+                   let first = users.first {
+                    await MainActor.run { currentUserId = first.id }
                 }
                 await MainActor.run {
                     feedPosts = filtered

@@ -135,6 +135,11 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    /// Удалить пост со стены (после успешного wall.delete). Убирает запись из wallPosts.
+    func removeWallPost(_ post: VKPost) {
+        wallPosts.removeAll { $0.postId == post.postId }
+    }
+
     /// Стена пользователя (wall.get). ownerId — id пользователя (положительный).
     func loadWall(ownerId: Int?, forceRefresh: Bool) async {
         guard let ownerId = ownerId else { return }

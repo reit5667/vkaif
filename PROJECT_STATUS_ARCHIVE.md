@@ -27,6 +27,13 @@
 **Прочее**
 - Группы: без filter, цикл offset; кликабельные группы в профиле. Друзья count=5000. Комментарии из fullscreen поверх галереи, «Назад» возвращает на картинку.
 
+**Репосты и операции в ленте (апрув)**
+- Репосты: модель VKPostReposts, поле reposts в VKPost; счётчик + Menu «На свою стену» (wall.repost) и «В личку» (заглушка). ContentView, GroupWallView, ProfileWallTabView: postRepostOverrides, repostInProgress, repostToWall(). VKApiService.wallRepost(token, object: "wall{owner_id}_{post_id}").
+- «Добавить в сохранённые»: getAccessToken в fullScreenCover, onAddToSaved(token, ownerId, photoId, accessKey) async -> Bool; все вызовы обновлены.
+- Галерея: overlay showActionsOverlay вместо Menu (избежание _UIReparentingView).
+- Плеер «Возобновить»: document.querySelector('video').play() и клик по video; скрипт с задержками; state из WKScriptMessageHandler через asyncAfter(0.05) / DispatchQueue.main.async при replay.
+- Авторизация: load в updateUIView, handleRedirect + cancel (без JS/fragment).
+
 ---
 
 ## Ссылки на код (для справки)
@@ -35,3 +42,8 @@
 - FullScreenPhotoGalleryView: photoIdsForSaving, onAddToSaved, postCommentsContext, photoCommentsContext.
 - VideoPlayerView: VideoWebView, videoBridgeScript, keepVideoVisibleScript, hideOverlaysScript; кнопки в шапке (Возобновить, Повторить).
 - VKApiService: newsfeed.get, wall.get, video.get, likes.add/delete, photos.copy, polls.addVote, getFriends, getGroups, photos.getAlbums, photos.get, wall.getComments, photos.getComments.
+
+**Удаление поста и фото, меню поста (апрув)**
+- Удаление поста: VKApiService.wallDelete(owner_id, post_id). Меню «три точки» в шапке ячейки поста (ellipsis.circle): пункт «Удалить» только для своих постов (owner_id == currentUserId). Лента (ContentView): currentUserId через getUsers при loadFeed, deletePost(), пост убирается из feedPosts. Стена профиля: ProfileViewModel.removeWallPost, ProfileWallTabView isOwnProfile + onDeletePost, PostCellView canDeletePost/onDelete/deleteInProgress.
+- Ячейки вынесены в отдельные файлы из-за ограничений компилятора Swift на сложные инициализаторы: FeedPostRowCell.swift (лента), ProfileWallPostCell.swift (стена профиля); типизированные локальные переменные для замыканий и явные приведения nil где нужно.
+- Удаление фото: VKApiService.photosDelete. В fullscreen галерее для своих фото (isOwnPhotos/canDeletePost): пункт «Удалить» в меню «три точки»; «Добавить в сохранённые» показывается только для чужих фото (для своих скрыто). PostCellView: onDeletePhoto, fullScreenGalleryView(initialIndex:) с типизированными опционалами.

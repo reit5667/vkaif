@@ -9,9 +9,14 @@ struct ProfileWallTabView: View {
     let loadState: ProfileTabLoadState
     let user: VKUserDetail
     @ObservedObject var authService: AuthService
+    /// true = стена текущего пользователя (показывать меню «Удалить» у постов).
+    var isOwnProfile: Bool = false
+    /// После успешного wall.delete — убрать пост из списка. nil = не показывать удаление.
+    var onDeletePost: ((VKPost) -> Void)? = nil
     var onRefresh: () async -> Void
 
     @State private var commentsContext: PostCommentsContext? = nil
+    @State private var deleteInProgress: Set<String> = []
     @State private var postLikeOverrides: [String: Int] = [:]
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []
@@ -96,15 +101,22 @@ struct ProfileWallTabView: View {
         let repostCount = postRepostOverrides[post.postId]
         let repostLoading = repostInProgress.contains(post.postId)
         let repostToWallAction: (() -> Void)? = repostLoading ? nil : { repostToWall(post) }
-        return PostCellView(
+        let cell = ProfileWallPostCell(
             post: post,
-            authorName: user.displayName,
-            authorAvatarURL: user.avatarURL,
-            relativeDate: relativeDateString(from: post.date),
+            user: user,
             profiles: profiles,
             groups: groups,
             authService: authService,
-            feedDestination: nil,
+            ownerId: ownerId,
+            isOwnProfile: isOwnProfile,
+            onDeletePost: onDeletePost,
+            commentsContext: $commentsContext,
+            postLikeOverrides: postLikeOverrides[post.postId],
+            postLikedOverrides: postLikedOverrides[post.postId],
+            likeInProgress: likeInProgress.contains(post.postId),
+            repostCount: repostCount,
+            repostLoading: repostLoading,
+            deleteInProgress: deleteInProgress.contains(post.postId),
             onTapComments: {
                 commentsContext = PostCommentsContext(
                     ownerId: post.ownerId ?? ownerId,
@@ -112,18 +124,15 @@ struct ProfileWallTabView: View {
                     totalCount: post.commentsCount
                 )
             },
-            likesCountOverride: postLikeOverrides[post.postId],
-            isLikedOverride: postLikedOverrides[post.postId],
-            onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-            likeInProgress: likeInProgress.contains(post.postId),
-            onTapVideo: { video, ownerId, post in
+            onLike: { likeToggle(post) },
+            onTapVideo: { video, videoOwnerId, post in
                 var url: URL?
                 if let p = video.player, let u = URL(string: p) {
                     url = u
                 } else {
                     let token = await MainActor.run { authService.accessToken } ?? ""
                     if !token.isEmpty,
-                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: videoOwnerId)),
                        let first = res.items.first,
                        let playerURL = first.player {
                         url = URL(string: playerURL)
@@ -134,17 +143,33 @@ struct ProfileWallTabView: View {
                     videoPlayerPost = post
                 }
             },
-            pollVoteOverrides: nil,
-            onPollVote: nil,
-            pollVoteInProgress: [],
-            repostsCountOverride: repostCount,
-            onRepostToWall: repostToWallAction,
-            onRepostToDM: { showRepostDMStub = true },
-            repostInProgress: repostLoading,
+            onRepostToWall: { repostToWall(post) },
+            onRepostDM: { showRepostDMStub = true },
+            onDelete: { deletePost(post) },
+            onDeletePhoto: { token, oid, pid in await deletePhotoFromPost(token: token, ownerId: oid, photoId: pid) },
             onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
             getAccessToken: { authService.accessToken ?? "" }
         )
-        .padding(.vertical, 8)
+        return cell
+    }
+
+    private func deletePost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let oid = post.ownerId ?? post.fromId ?? ownerId
+        let pid = post.postId
+        if deleteInProgress.contains(pid) { return }
+        deleteInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallDelete(token: token, ownerId: oid, postId: post.id)
+                await MainActor.run {
+                    onDeletePost?(post)
+                    deleteInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { deleteInProgress.remove(pid) }
+            }
+        }
     }
 
     private func likeToggle(_ post: VKPost) {
@@ -211,6 +236,16 @@ struct ProfileWallTabView: View {
             return true
         } catch {
             AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(ownerId) photoId=\(photoId)", error: error)
+            return false
+        }
+    }
+
+    private func deletePhotoFromPost(token: String, ownerId: Int, photoId: Int) async -> Bool {
+        guard !token.isEmpty else { return false }
+        do {
+            try await vkApi.photosDelete(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch {
             return false
         }
     }
