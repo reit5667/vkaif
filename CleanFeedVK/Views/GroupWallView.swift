@@ -8,11 +8,16 @@ struct GroupWallView: View {
 
     @State private var group: VKGroup?
     @State private var posts: [VKPost] = []
+    @State private var profiles: [VKProfile] = []
+    @State private var groups: [VKGroup] = []
     @State private var loadState: GroupWallLoadState = .idle
     @State private var commentsContext: PostCommentsContext? = nil
     @State private var postLikeOverrides: [String: Int] = [:]
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []
+    @State private var postRepostOverrides: [String: Int] = [:]
+    @State private var repostInProgress: Set<String> = []
+    @State private var showRepostDMStub = false
     @State private var videoPlayerURL: URL? = nil
     @State private var videoPlayerPost: VKPost? = nil
 
@@ -39,45 +44,7 @@ struct GroupWallView: View {
                             groupHeader(group: g)
                         }
                         ForEach(posts, id: \.postId) { post in
-                            PostCellView(
-                                post: post,
-                                authorName: group?.name ?? "Группа",
-                                authorAvatarURL: group?.photo50,
-                                relativeDate: relativeDateString(from: post.date),
-                                authService: nil,
-                                feedDestination: nil,
-                                onTapComments: {
-                                    commentsContext = PostCommentsContext(
-                                        ownerId: post.ownerId ?? ownerId,
-                                        postId: post.id,
-                                        totalCount: post.commentsCount
-                                    )
-                                },
-                                likesCountOverride: postLikeOverrides[post.postId],
-                                isLikedOverride: postLikedOverrides[post.postId],
-                                onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-                                likeInProgress: likeInProgress.contains(post.postId),
-                                onTapVideo: { video, ownerId, post in
-                                    var url: URL?
-                                    if let p = video.player, let u = URL(string: p) {
-                                        url = u
-                                    } else {
-                                        let token = await MainActor.run { authService.accessToken } ?? ""
-                                        if !token.isEmpty,
-                                           let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
-                                           let first = res.items.first,
-                                           let playerURL = first.player {
-                                            url = URL(string: playerURL)
-                                        }
-                                    }
-                                    await MainActor.run {
-                                        videoPlayerURL = url
-                                        videoPlayerPost = post
-                                    }
-                                },
-                                onAddToSaved: { oid, pid in await addPhotoToSaved(ownerId: oid, photoId: pid) }
-                            )
-                            .padding(.vertical, 8)
+                            groupWallPostRow(post)
                             Divider()
                         }
                     }
@@ -111,6 +78,11 @@ struct GroupWallView: View {
             if let url = videoPlayerURL {
                 groupWallVideoPlayerContent(url: url)
             }
+        }
+        .alert("Репост в личку", isPresented: $showRepostDMStub) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Скоро. Раздел сообщений в разработке.")
         }
     }
 
@@ -165,6 +137,61 @@ struct GroupWallView: View {
         .padding(.vertical, 8)
     }
 
+    private func groupWallPostRow(_ post: VKPost) -> some View {
+        let repostCount = postRepostOverrides[post.postId]
+        let repostLoading = repostInProgress.contains(post.postId)
+        let repostToWallAction: (() -> Void)? = repostLoading ? nil : { repostToWall(post) }
+        return PostCellView(
+            post: post,
+            authorName: group?.name ?? "Группа",
+            authorAvatarURL: group?.photo50,
+            relativeDate: relativeDateString(from: post.date),
+            profiles: profiles,
+            groups: groups,
+            authService: nil,
+            feedDestination: nil,
+            onTapComments: {
+                commentsContext = PostCommentsContext(
+                    ownerId: post.ownerId ?? ownerId,
+                    postId: post.id,
+                    totalCount: post.commentsCount
+                )
+            },
+            likesCountOverride: postLikeOverrides[post.postId],
+            isLikedOverride: postLikedOverrides[post.postId],
+            onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+            likeInProgress: likeInProgress.contains(post.postId),
+            onTapVideo: { video, ownerId, post in
+                var url: URL?
+                if let p = video.player, let u = URL(string: p) {
+                    url = u
+                } else {
+                    let token = await MainActor.run { authService.accessToken } ?? ""
+                    if !token.isEmpty,
+                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                       let first = res.items.first,
+                       let playerURL = first.player {
+                        url = URL(string: playerURL)
+                    }
+                }
+                await MainActor.run {
+                    videoPlayerURL = url
+                    videoPlayerPost = post
+                }
+            },
+            pollVoteOverrides: nil,
+            onPollVote: nil,
+            pollVoteInProgress: [],
+            repostsCountOverride: repostCount,
+            onRepostToWall: repostToWallAction,
+            onRepostToDM: { showRepostDMStub = true },
+            repostInProgress: repostLoading,
+            onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
+            getAccessToken: { authService.accessToken ?? "" }
+        )
+        .padding(.vertical, 8)
+    }
+
     private func load() {
         guard let token = authService.accessToken else { return }
         loadState = .loading
@@ -177,6 +204,8 @@ struct GroupWallView: View {
                 await MainActor.run {
                     group = g
                     posts = wall.items
+                    profiles = wall.profiles ?? []
+                    groups = wall.groups ?? []
                     loadState = .loaded
                 }
             } catch {
@@ -226,11 +255,40 @@ struct GroupWallView: View {
         }
     }
 
-    private func addPhotoToSaved(ownerId: Int, photoId: Int) async -> Bool {
-        guard let token = authService.accessToken else { return false }
+    private func repostToWall(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let oid = post.ownerId ?? ownerId
+        guard oid != 0 else { return }
+        let pid = post.postId
+        if repostInProgress.contains(pid) { return }
+        repostInProgress.insert(pid)
+        let object = "wall\(oid)_\(post.id)"
+        Task {
+            do {
+                let response = try await vkApi.wallRepost(token: token, object: object)
+                await MainActor.run {
+                    if let newCount = response.repostsCount {
+                        postRepostOverrides[pid] = newCount
+                    }
+                    repostInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { repostInProgress.remove(pid) }
+            }
+        }
+    }
+
+    private func addPhotoToSaved(token: String, ownerId: Int, photoId: Int, accessKey: String? = nil) async -> Bool {
+        guard !token.isEmpty else {
+            AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
+            return false
+        }
         do {
-            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId)
+            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId, accessKey: accessKey)
             return true
-        } catch { return false }
+        } catch {
+            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(ownerId) photoId=\(photoId)", error: error)
+            return false
+        }
     }
 }

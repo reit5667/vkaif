@@ -56,18 +56,23 @@ struct WebView: UIViewRepresentable {
     let authService: AuthService
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(authService: authService)
+        Coordinator(authService: authService, initialURL: url)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
+        context.coordinator.lastLoadedURL = url
         return webView
     }
 
+    /// Не перезагружаем страницу при каждом обновлении — иначе после успешного редиректа перезагрузка auth URL затирает состояние.
     func updateUIView(_ webView: WKWebView, context: Context) {
-        let request = URLRequest(url: url)
-        webView.load(request)
+        if context.coordinator.lastLoadedURL != url {
+            context.coordinator.lastLoadedURL = url
+            webView.load(URLRequest(url: url))
+        }
     }
 
     // MARK: - Coordinator (WKNavigationDelegate)
@@ -75,9 +80,11 @@ struct WebView: UIViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate {
 
         let authService: AuthService
+        var lastLoadedURL: URL?
 
-        init(authService: AuthService) {
+        init(authService: AuthService, initialURL: URL) {
             self.authService = authService
+            self.lastLoadedURL = initialURL
         }
 
         /// Вызывается перед каждой навигацией.

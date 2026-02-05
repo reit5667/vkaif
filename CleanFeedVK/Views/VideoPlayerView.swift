@@ -10,7 +10,9 @@ struct VideoPlayerPostContext {
     let onTapComments: () -> Void
 }
 
-/// Полноэкранный плеер VK по URL. Закрытие — кнопка. Снизу только лайки и комментарии; реплей по центру после окончания; кнопка Play при паузе.
+/// Полноэкранный плеер VK по URL. Закрытие — кнопка. Снизу лайки и комментарии; реплей по центру после окончания.
+/// Одна кнопка «Пауза» / «Возобновить»: при воспроизведении — пауза (video.pause()), при паузе — возобновление (video.play()).
+/// Ограничение: при паузе через интерфейс VK может показываться «следующее видео»; наша кнопка «Пауза» ставит на паузу без переключения.
 struct VideoPlayerView: View {
     let url: URL
     let onDismiss: () -> Void
@@ -19,10 +21,18 @@ struct VideoPlayerView: View {
 
     @State private var replayTrigger = 0
     @State private var videoEnded = false
-    /// true = видео на паузе (показываем кнопку возобновления).
+    /// true = видео на паузе (показываем «Возобновить»).
     @State private var videoPaused = false
-    /// Инкремент при тапе «Возобновить» — WebView выполняет video.play().
+    /// Инкремент при тапе «Возобновить» — один вызов video.play().
     @State private var playRequestTrigger = 0
+    /// Инкремент при тапе «Пауза» — один вызов video.pause() (без переключения на «следующее видео» VK).
+    @State private var pauseRequestTrigger = 0
+
+    /// Рилсы (короткие видео): наши кнопки работают. Длинные видео: только родной плеер VK, наши кнопки скрыты.
+    private var isReelsLike: Bool {
+        let lower = url.absoluteString.lowercased()
+        return lower.contains("clip") || lower.contains("reel") || lower.contains("short")
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -31,7 +41,8 @@ struct VideoPlayerView: View {
                 replayTrigger: replayTrigger,
                 videoEnded: $videoEnded,
                 videoPaused: $videoPaused,
-                playRequestTrigger: playRequestTrigger
+                playRequestTrigger: playRequestTrigger,
+                pauseRequestTrigger: pauseRequestTrigger
             )
             .ignoresSafeArea()
 
@@ -44,13 +55,26 @@ struct VideoPlayerView: View {
                             .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                     }
                     Spacer(minLength: 0)
-                    Button(action: { playRequestTrigger += 1 }) {
-                        Label("Возобновить", systemImage: "play.circle.fill")
+                    if isReelsLike {
+                        Button(action: {
+                            if videoPaused {
+                                playRequestTrigger += 1
+                                videoPaused = false
+                            } else {
+                                pauseRequestTrigger += 1
+                                videoPaused = true
+                            }
+                        }) {
+                            Label(
+                                videoPaused ? "Возобновить" : "Пауза",
+                                systemImage: videoPaused ? "play.circle.fill" : "pause.circle.fill"
+                            )
                             .font(.title3)
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     Button(action: {
                         videoEnded = false
                         replayTrigger += 1
@@ -63,6 +87,29 @@ struct VideoPlayerView: View {
                     .buttonStyle(.plain)
                 }
                 .padding(16)
+
+                Spacer(minLength: 0)
+
+                if isReelsLike {
+                    Button {
+                        if videoPaused {
+                            playRequestTrigger += 1
+                            videoPaused = false
+                        } else {
+                            pauseRequestTrigger += 1
+                            videoPaused = true
+                        }
+                    } label: {
+                        Image(systemName: videoPaused ? "play.circle.fill" : "pause.circle.fill")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 80, height: 80)
+                    .contentShape(Circle())
+                    .zIndex(0.5)
+                }
 
                 Spacer(minLength: 0)
 
@@ -128,7 +175,7 @@ struct VideoPlayerView: View {
 /// Скрипт скрывает блоки рекомендаций (карточки «Эпизод», «следующее видео»). Не трогает элементы, содержащие video — иначе при паузе/конце получается черный экран.
 private let hideOverlaysScript = """
 (function() {
-    var sel = '[class*="recommend"],[class*="Recommend"],[id*="recommend"],[class*="related"],[class*="Related"],[class*="suggest"],[class*="next-video"],[class*="NextVideo"],[class*="countdown"],[class*="Countdown"],[class*="autoplay"],[class*="Autoplay"],[class*="VideoCard"],[class*="video-card"],[data-class*="recommend"],[data-class*="related"]';
+    var sel = '[class*="recommend"],[class*="Recommend"],[id*="recommend"],[class*="related"],[class*="Related"],[class*="suggest"],[class*="next-video"],[class*="NextVideo"],[class*="autoplay"],[class*="Autoplay"],[data-class*="recommend"],[data-class*="related"]';
     var hideKeywords = ['следующ','начнётся через','next video','эпизод','история вселенной','история и геймдизайн','полная версия'];
     function containsVideo(el) { return el && (el.tagName === 'VIDEO' || (el.querySelector && el.querySelector('video'))); }
     function hide() {
@@ -144,29 +191,29 @@ private let hideOverlaysScript = """
         });
     }
     hide();
-    var t = 0, id = setInterval(function() { hide(); t++; if (t > 80) clearInterval(id); }, 350);
+    setTimeout(hide, 1500);
+    setTimeout(hide, 3000);
 })();
 """
 
-/// Держим video и его контейнеры видимыми — чтобы при паузе/конце не оставался черный экран (VK иногда скрывает плеер).
+/// Держим video и контейнеры видимыми при загрузке (чтобы не было чёрного экрана). Запуск 3 раз без setInterval — не ломаем контролы обычного плеера.
 private let keepVideoVisibleScript = """
 (function() {
     function keepVisible() {
         document.querySelectorAll('video').forEach(function(v) {
             v.style.setProperty('opacity', '1', 'important');
             v.style.setProperty('visibility', 'visible', 'important');
-            v.style.setProperty('display', 'block', 'important');
             var p = v.parentElement;
-            for (var i = 0; i < 8 && p; i++) {
+            for (var i = 0; i < 5 && p; i++) {
                 p.style.setProperty('opacity', '1', 'important');
                 p.style.setProperty('visibility', 'visible', 'important');
-                p.style.setProperty('display', '', 'important');
                 p = p.parentElement;
             }
         });
     }
     keepVisible();
-    setInterval(keepVisible, 600);
+    setTimeout(keepVisible, 1000);
+    setTimeout(keepVisible, 2500);
 })();
 """
 
@@ -195,6 +242,10 @@ private let videoBridgeScript = """
             var v = document.querySelector('video');
             if (v) v.play();
         }
+        if (e.data && e.data.type === 'requestPause') {
+            var v = document.querySelector('video');
+            if (v) v.pause();
+        }
     });
     function setupVideo(v) {
         if (!v || v.dataset.videoBridge) return;
@@ -216,9 +267,36 @@ private let videoBridgeScript = """
 })();
 """
 
-/// Запрос воспроизведения из Swift (кнопка «Возобновить» или после реплея). Выполняется в main frame, iframe получит через postMessage.
+/// Запрос воспроизведения из Swift (кнопка «Возобновить»): postMessage во все фреймы + video.play() в main frame (один вызов).
 private let videoRequestPlayScript = """
-window.postMessage({ type: 'requestPlay' }, '*');
+(function() {
+    var msg = { type: 'requestPlay' };
+    try { window.postMessage(msg, '*'); } catch (e) {}
+    var iframes = document.querySelectorAll('iframe');
+    for (var i = 0; i < iframes.length; i++) {
+        try {
+            if (iframes[i].contentWindow) iframes[i].contentWindow.postMessage(msg, '*');
+        } catch (e) {}
+    }
+    var v = document.querySelector('video');
+    if (v) v.play().catch(function() {});
+})();
+"""
+
+/// Запрос паузы из Swift (кнопка «Пауза»): postMessage во все фреймы + video.pause() в main frame. Не триггерит «следующее видео» VK.
+private let videoRequestPauseScript = """
+(function() {
+    var msg = { type: 'requestPause' };
+    try { window.postMessage(msg, '*'); } catch (e) {}
+    var iframes = document.querySelectorAll('iframe');
+    for (var i = 0; i < iframes.length; i++) {
+        try {
+            if (iframes[i].contentWindow) iframes[i].contentWindow.postMessage(msg, '*');
+        } catch (e) {}
+    }
+    var v = document.querySelector('video');
+    if (v) v.pause();
+})();
 """
 
 private struct VideoWebView: UIViewRepresentable {
@@ -227,6 +305,7 @@ private struct VideoWebView: UIViewRepresentable {
     @Binding var videoEnded: Bool
     @Binding var videoPaused: Bool
     var playRequestTrigger: Int
+    var pauseRequestTrigger: Int
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -266,8 +345,10 @@ private struct VideoWebView: UIViewRepresentable {
         coord.videoPausedBinding = $videoPaused
         if replayTrigger != coord.lastReplayTrigger {
             coord.lastReplayTrigger = replayTrigger
-            coord.videoEndedBinding?.wrappedValue = false
-            coord.videoPausedBinding?.wrappedValue = false
+            DispatchQueue.main.async {
+                coord.videoEndedBinding?.wrappedValue = false
+                coord.videoPausedBinding?.wrappedValue = false
+            }
             webView.load(URLRequest(url: url))
         } else if webView.url != url {
             webView.load(URLRequest(url: url))
@@ -275,6 +356,16 @@ private struct VideoWebView: UIViewRepresentable {
         if playRequestTrigger != coord.lastPlayRequestTrigger {
             coord.lastPlayRequestTrigger = playRequestTrigger
             webView.evaluateJavaScript(videoRequestPlayScript, completionHandler: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak webView] in
+                webView?.evaluateJavaScript(videoRequestPlayScript, completionHandler: nil)
+            }
+        }
+        if pauseRequestTrigger != coord.lastPauseRequestTrigger {
+            coord.lastPauseRequestTrigger = pauseRequestTrigger
+            webView.evaluateJavaScript(videoRequestPauseScript, completionHandler: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak webView] in
+                webView?.evaluateJavaScript(videoRequestPauseScript, completionHandler: nil)
+            }
         }
     }
 
@@ -283,16 +374,17 @@ private struct VideoWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastReplayTrigger: Int = 0
         var lastPlayRequestTrigger: Int = 0
+        var lastPauseRequestTrigger: Int = 0
         var videoEndedBinding: Binding<Bool>?
         var videoPausedBinding: Binding<Bool>?
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "videoEnded" {
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                     self?.videoEndedBinding?.wrappedValue = true
                 }
             } else if message.name == "videoPaused" {
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                     self?.videoPausedBinding?.wrappedValue = true
                 }
             }
@@ -308,8 +400,14 @@ private struct VideoWebView: UIViewRepresentable {
                     w.evaluateJavaScript(hideOverlaysScript, completionHandler: nil)
                     w.evaluateJavaScript(keepVideoVisibleScript, completionHandler: nil)
                     w.evaluateJavaScript(videoBridgeScript, completionHandler: nil)
-                    w.evaluateJavaScript(videoRequestPlayScript, completionHandler: nil)
                 }
+            }
+            // Автозапуск: без этого рилсы и длинные видео открываются в паузе.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak webView] in
+                webView?.evaluateJavaScript(videoRequestPlayScript, completionHandler: nil)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak webView] in
+                webView?.evaluateJavaScript(videoRequestPlayScript, completionHandler: nil)
             }
         }
     }

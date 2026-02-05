@@ -29,6 +29,8 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var albumsLoadState: ProfileTabLoadState = .idle
 
     @Published private(set) var wallPosts: [VKPost] = []
+    @Published private(set) var wallProfiles: [VKProfile] = []
+    @Published private(set) var wallGroups: [VKGroup] = []
     @Published private(set) var wallLoadState: ProfileTabLoadState = .idle
 
     /// Защита от двойного onAppear: начальную загрузку запускаем только один раз.
@@ -144,6 +146,8 @@ final class ProfileViewModel: ObservableObject {
             let response = try await vkApi.getWall(token: token, ownerId: ownerId, count: 30, offset: 0)
             await MainActor.run {
                 wallPosts = response.items
+                wallProfiles = response.profiles ?? []
+                wallGroups = response.groups ?? []
                 wallLoadState = .loaded
             }
         } catch {

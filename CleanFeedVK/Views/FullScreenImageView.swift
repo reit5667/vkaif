@@ -47,6 +47,15 @@ struct FullScreenImageView: View {
     }
 }
 
+// MARK: - Идентификатор фото для сохранения (photos.copy)
+
+/// owner_id, photo_id и опционально access_key для «Добавить в сохранённые».
+struct PhotoSaveId: Hashable {
+    let ownerId: Int
+    let photoId: Int
+    let accessKey: String?
+}
+
 // MARK: - Галерея с пролистыванием (пост / альбом)
 
 /// Несколько фото на весь экран: PageView, панель по тапу (лайк, комментарии, 3 точки), закрытие — кнопка или свайп вниз.
@@ -67,20 +76,34 @@ struct FullScreenPhotoGalleryView: View {
     /// Контекст комментариев к фото (альбом) — sheet показывается из галереи.
     var photoCommentsContext: PhotoCommentsContext? = nil
     var authService: AuthService? = nil
-    /// Для «Добавить в сохранённые»: массив (owner_id, photo_id) в том же порядке, что и urls. nil — пункт скрыт/неактивен.
-    var photoIdsForSaving: [(ownerId: Int, photoId: Int)]? = nil
-    /// Вызов при тапе «Добавить в сохранённые». (ownerId, photoId) — текущее фото. Возвращает true при успехе.
-    var onAddToSaved: ((Int, Int) async -> Bool)? = nil
+    /// Для «Добавить в сохранённые»: массив в том же порядке, что и urls. nil — пункт скрыт/неактивен.
+    var photoIdsForSaving: [PhotoSaveId]? = nil
+    /// Вызов при тапе «Добавить в сохранённые». (token, ownerId, photoId, accessKey). Возвращает true при успехе.
+    var onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil
+    /// Опционально: возврат токена при тапе «Добавить в сохранённые» (надёжнее в fullScreenCover).
+    var getAccessToken: (() -> String)? = nil
+    /// true = альбом «Сохранённые»: пункт «Добавить в сохранённые» не показываем (VK не даёт копировать из него снова).
+    var isSavedAlbum: Bool = false
+    /// Токен на момент открытия галереи (в fullScreenCover getAccessToken часто пуст — передаём сюда при показе).
+    var initialAccessToken: String = ""
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
     @State private var addToSavedInProgress = false
     @State private var addToSavedDone = false
     @State private var addToSavedFailed = false
+    /// Показать тост «Фото добавлено в «Сохранённые»» после успешного сохранения.
+    @State private var showSavedToast = false
+    /// Показать тост «Не удалось сохранить» при ошибке.
+    @State private var showFailedToast = false
     /// Локальное переопределение после тапа «Нравится» до закрытия галереи.
     @State private var likedOverride: Bool? = nil
     @State private var presentedPostComments: PostCommentsContext? = nil
     @State private var presentedPhotoComments: PhotoCommentsContext? = nil
+    /// Показать панель действий (вместо Menu — избегаем _UIReparentingView в fullScreenCover).
+    @State private var showActionsOverlay = false
+    /// Токен, захваченный при открытии панели «три точки» — чтобы в fullScreenCover не терять.
+    @State private var capturedTokenForSave: String = ""
 
     init(
         urls: [URL],
@@ -94,8 +117,11 @@ struct FullScreenPhotoGalleryView: View {
         postCommentsContext: PostCommentsContext? = nil,
         photoCommentsContext: PhotoCommentsContext? = nil,
         authService: AuthService? = nil,
-        photoIdsForSaving: [(ownerId: Int, photoId: Int)]? = nil,
-        onAddToSaved: ((Int, Int) async -> Bool)? = nil
+        photoIdsForSaving: [PhotoSaveId]? = nil,
+        onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil,
+        getAccessToken: (() -> String)? = nil,
+        isSavedAlbum: Bool = false,
+        initialAccessToken: String = ""
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -110,7 +136,11 @@ struct FullScreenPhotoGalleryView: View {
         self.authService = authService
         self.photoIdsForSaving = photoIdsForSaving
         self.onAddToSaved = onAddToSaved
+        self.getAccessToken = getAccessToken
+        self.isSavedAlbum = isSavedAlbum
+        self.initialAccessToken = initialAccessToken
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
+        _capturedTokenForSave = State(initialValue: initialAccessToken)
     }
 
     private var displayLiked: Bool { likedOverride ?? isLiked }
@@ -165,6 +195,96 @@ struct FullScreenPhotoGalleryView: View {
                     .padding(.bottom, 60)
                 }
 
+                if showActionsOverlay {
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+                        .onTapGesture { showActionsOverlay = false }
+                    VStack(spacing: 0) {
+                        if !isSavedAlbum {
+                            Button {
+                                guard let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone else {
+                                    showActionsOverlay = false
+                                    return
+                                }
+                                let item = ids[currentIndex]
+                                let token = capturedTokenForSave.isEmpty ? (getAccessToken?() ?? authService?.accessToken ?? "") : capturedTokenForSave
+                                addToSavedInProgress = true
+                                addToSavedFailed = false
+                                Task {
+                                    let ok = await save(token, item.ownerId, item.photoId, item.accessKey)
+                                    await MainActor.run {
+                                        addToSavedInProgress = false
+                                        showActionsOverlay = false
+                                        if ok {
+                                            addToSavedDone = true
+                                            showSavedToast = true
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                                showSavedToast = false
+                                            }
+                                        } else {
+                                            addToSavedFailed = true
+                                            showFailedToast = true
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                                showFailedToast = false
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                let title = addToSavedDone ? "Добавлено в сохранённые" : (addToSavedFailed ? "Не удалось сохранить" : "Добавить в сохранённые")
+                                Label(title, systemImage: addToSavedDone ? "checkmark.circle" : "square.and.arrow.down")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || onAddToSaved == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
+                            Divider()
+                        }
+                        Button("Закрыть") {
+                            showActionsOverlay = false
+                            onDismiss()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .foregroundStyle(.primary)
+                    }
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .frame(width: 280)
+                    .padding(.top, 56)
+                    .zIndex(20)
+                }
+
+                if showSavedToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text("Фото добавлено в «Сохранённые»")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .zIndex(2)
+                }
+                if showFailedToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text("Не удалось сохранить")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
+
                 // Стрелки влево/вправо — почти прозрачные, перелистывание
                 if urls.count > 1 {
                     HStack {
@@ -207,7 +327,10 @@ struct FullScreenPhotoGalleryView: View {
                 }
             }
         }
-        .onAppear { currentIndex = initialIndex }
+        .onAppear {
+            currentIndex = initialIndex
+            if !initialAccessToken.isEmpty { capturedTokenForSave = initialAccessToken }
+        }
         .sheet(item: $presentedPostComments) { ctx in
             if let auth = authService {
                 PostCommentsView(context: ctx, authService: auth)
@@ -233,35 +356,24 @@ struct FullScreenPhotoGalleryView: View {
             .padding(.leading, 16)
             .padding(.top, 8)
             Spacer(minLength: 0)
-            Menu {
-                Button {
-                    if let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone {
-                        let pair = ids[currentIndex]
-                        addToSavedInProgress = true
-                        addToSavedFailed = false
-                        Task {
-                            let ok = await save(pair.ownerId, pair.photoId)
-                            await MainActor.run {
-                                addToSavedInProgress = false
-                                if ok { addToSavedDone = true } else { addToSavedFailed = true }
-                            }
-                        }
-                    }
-                } label: {
-                    let title = addToSavedDone ? "Добавлено в сохранённые" : (addToSavedFailed ? "Не удалось сохранить" : "Добавить в сохранённые")
-                    Label(title, systemImage: addToSavedDone ? "checkmark.circle" : "square.and.arrow.down")
+            if !isSavedAlbum {
+            Button {
+                if capturedTokenForSave.isEmpty {
+                    capturedTokenForSave = getAccessToken?() ?? authService?.accessToken ?? ""
                 }
-                .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || onAddToSaved == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
-                Divider()
-                Button("Закрыть") { onDismiss() }
+                showActionsOverlay = true
             } label: {
-                Image(systemName: "ellipsis.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 16)
+                .padding(.top, 8)
             }
-            .padding(.trailing, 16)
-            .padding(.top, 8)
         }
         .padding(.top, 8)
     }

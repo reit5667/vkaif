@@ -161,15 +161,16 @@ final class AuthService: ObservableObject {
         }
     }
 
-    /// Парсит fragment вида "access_token=abc&expires_in=0&user_id=123"
+    /// Парсит fragment вида "access_token=abc&expires_in=0&user_id=123".
+    /// Токен может содержать "=" — разбиваем только по первому "=" в паре.
     private func parseFragment(_ fragment: String) -> [String: String] {
         var result: [String: String] = [:]
         let pairs = fragment.components(separatedBy: "&")
         for pair in pairs {
-            let kv = pair.components(separatedBy: "=")
-            if kv.count == 2 {
-                result[kv[0]] = kv[1]
-            }
+            guard let firstEq = pair.firstIndex(of: "=") else { continue }
+            let key = String(pair[..<firstEq])
+            let value = String(pair[pair.index(after: firstEq)...])
+            if !key.isEmpty { result[key] = value }
         }
         return result
     }

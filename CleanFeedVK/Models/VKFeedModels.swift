@@ -72,11 +72,41 @@ struct NewsfeedGetResponse: Decodable {
     }
 }
 
+/// Ответ wall.repost: success, post_id на стене пользователя, reposts_count (новый счётчик).
+struct WallRepostResponse: Decodable {
+    let success: Int
+    let postId: Int?
+    let repostsCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case success
+        case postId = "post_id"
+        case repostsCount = "reposts_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        success = try c.decode(Int.self, forKey: .success)
+        postId = try c.decodeIfPresent(Int.self, forKey: .postId)
+        repostsCount = try c.decodeIfPresent(Int.self, forKey: .repostsCount)
+    }
+}
+
 // MARK: - wall.get — ответ (лента группы)
 
 struct WallGetResponse: Decodable {
     let count: Int
     let items: [VKPost]
+    /// При extended=1 — профили и группы для подстановки имён/аватаров (в т.ч. авторов репостов).
+    let profiles: [VKProfile]?
+    let groups: [VKGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case items
+        case profiles
+        case groups
+    }
 }
 
 // MARK: - wall.getComments — комментарии к посту
@@ -189,6 +219,28 @@ struct VKPostComments: Decodable {
     let count: Int
 }
 
+/// Репосты поста (newsfeed.get / wall.get). user_reposted == 1 — текущий пользователь репостнул.
+struct VKPostReposts: Decodable {
+    let count: Int
+    let userReposted: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case userReposted = "user_reposted"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try c.decode(Int.self, forKey: .count)
+        userReposted = try c.decodeIfPresent(Int.self, forKey: .userReposted)
+    }
+
+    init(count: Int, userReposted: Int? = nil) {
+        self.count = count
+        self.userReposted = userReposted
+    }
+}
+
 struct VKPost: Decodable {
     let id: Int
     let fromId: Int?
@@ -207,6 +259,8 @@ struct VKPost: Decodable {
     let likes: VKPostLikes?
     /// Счётчик комментариев (если вернул API).
     let comments: VKPostComments?
+    /// Счётчик репостов (если вернул API).
+    let reposts: VKPostReposts?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -221,6 +275,7 @@ struct VKPost: Decodable {
         case copyHistory = "copy_history"
         case likes
         case comments
+        case reposts
     }
 
     init(from decoder: Decoder) throws {
@@ -245,10 +300,12 @@ struct VKPost: Decodable {
         } else {
             comments = nil
         }
+        reposts = try c.decodeIfPresent(VKPostReposts.self, forKey: .reposts)
     }
 
     var likesCount: Int { likes?.count ?? 0 }
     var commentsCount: Int { comments?.count ?? 0 }
+    var repostsCount: Int { reposts?.count ?? 0 }
 }
 
 // MARK: - Вложение (минимально: тип + опциональные поля)
@@ -336,6 +393,8 @@ struct VKPhoto: Decodable {
     let sizes: [VKPhotoSize]?
     let likes: VKPhotoLikes?
     let comments: VKPhotoComments?
+    /// Для photos.copy у фото из приватных альбомов / чужих постов (если VK отдал).
+    let accessKey: String?
     /// Legacy (VK может отдавать фото без sizes, но с photo_75, photo_604 и т.д.).
     let photo75: String?
     let photo130: String?
@@ -349,6 +408,7 @@ struct VKPhoto: Decodable {
         case sizes
         case likes
         case comments
+        case accessKey = "access_key"
         case photo75 = "photo_75"
         case photo130 = "photo_130"
         case photo604 = "photo_604"
@@ -363,6 +423,7 @@ struct VKPhoto: Decodable {
         sizes = try c.decodeIfPresent([VKPhotoSize].self, forKey: .sizes)
         likes = try c.decodeIfPresent(VKPhotoLikes.self, forKey: .likes)
         comments = try c.decodeIfPresent(VKPhotoComments.self, forKey: .comments)
+        accessKey = try c.decodeIfPresent(String.self, forKey: .accessKey)
         photo75 = try c.decodeIfPresent(String.self, forKey: .photo75)
         photo130 = try c.decodeIfPresent(String.self, forKey: .photo130)
         photo604 = try c.decodeIfPresent(String.self, forKey: .photo604)

@@ -112,6 +112,8 @@ struct ProfileView: View {
         case .wall:
             ProfileWallTabView(
                 posts: viewModel.wallPosts,
+                profiles: viewModel.wallProfiles,
+                groups: viewModel.wallGroups,
                 loadState: viewModel.wallLoadState,
                 user: user,
                 authService: authService,

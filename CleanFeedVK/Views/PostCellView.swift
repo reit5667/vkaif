@@ -18,6 +18,9 @@ struct PostCellView: View {
     let authorName: String
     let authorAvatarURL: String?
     let relativeDate: String
+    /// Для разрешения автора репоста (copy_history). На стене группы — из wall.get extended=1.
+    var profiles: [VKProfile] = []
+    var groups: [VKGroup] = []
     /// Для навигации из ленты: тап по автору → группа/профиль. nil в превью или на стене группы.
     var authService: AuthService? = nil
     var feedDestination: FeedDestination? = nil
@@ -39,6 +42,14 @@ struct PostCellView: View {
     var onPollVote: ((VKPost, VKPoll, Int) -> Void)? = nil
     /// Ключи опросов, по которым идёт запрос голоса (блокируем повторный тап).
     var pollVoteInProgress: Set<String> = []
+    /// Переопределение счётчика репостов (после wall.repost). nil = из post.
+    var repostsCountOverride: Int? = nil
+    /// Репост на свою стену. nil = только отображение счётчика.
+    var onRepostToWall: (() -> Void)? = nil
+    /// Репост в личку (заглушка: показать «Скоро»). nil = не показывать пункт.
+    var onRepostToDM: (() -> Void)? = nil
+    /// true = запрос репоста в процессе.
+    var repostInProgress: Bool = false
 
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
@@ -59,17 +70,19 @@ struct PostCellView: View {
     private var photoThumbnailURLsAsURLs: [URL] { photoThumbnailURLs.compactMap { URL(string: $0) } }
     private var photoDisplayURLsAsURLs: [URL] { photoDisplayURLs.compactMap { URL(string: $0) } }
 
-    /// (owner_id, photo_id) для каждого фото поста — в том же порядке, что и photoDisplayURLs (для «Добавить в сохранённые» в fullscreen).
-    private var photoIdsForSavingFromPost: [(ownerId: Int, photoId: Int)] {
+    /// Идентификаторы для «Добавить в сохранённые» — в том же порядке, что и photoDisplayURLs.
+    private var photoIdsForSavingFromPost: [PhotoSaveId] {
         let owner = post.ownerId ?? post.fromId ?? 0
-        return (post.attachments ?? []).compactMap { att -> (Int, Int)? in
+        return (post.attachments ?? []).compactMap { att -> PhotoSaveId? in
             guard let p = att.photo else { return nil }
-            return (owner, p.id)
+            return PhotoSaveId(ownerId: owner, photoId: p.id, accessKey: p.accessKey)
         }
     }
 
-    /// Тап «Добавить в сохранённые» в fullscreen галерее фото поста. nil = пункт неактивен.
-    var onAddToSaved: ((Int, Int) async -> Bool)? = nil
+    /// Тап «Добавить в сохранённые» в fullscreen галерее фото поста. nil = пункт неактивен. (token, ownerId, photoId, accessKey).
+    var onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil
+    /// Опционально: возврат токена для сохранения (надёжнее в fullScreenCover).
+    var getAccessToken: (() -> String)? = nil
 
     /// Видео из вложений поста с ownerId для плеера/video.get.
     private var videoAttachments: [(video: VKVideo, ownerId: Int)] {
@@ -118,7 +131,10 @@ struct PostCellView: View {
             if hasOtherMedia {
                 mediaPlaceholder
             }
-            if displayLikesCount > 0 || onLike != nil || post.commentsCount > 0 || onTapComments != nil {
+            if let repost = post.copyHistory?.first {
+                repostBlock(repost)
+            }
+            if displayLikesCount > 0 || onLike != nil || post.commentsCount > 0 || onTapComments != nil || displayRepostsCount > 0 || onRepostToWall != nil {
                 likesCommentsRow
             }
         }
@@ -145,7 +161,9 @@ struct PostCellView: View {
                         : nil,
                     authService: authService,
                     photoIdsForSaving: photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost,
-                    onAddToSaved: onAddToSaved
+                    onAddToSaved: onAddToSaved,
+                    getAccessToken: getAccessToken,
+                    initialAccessToken: getAccessToken?() ?? ""
                 )
             }
         }
@@ -476,6 +494,66 @@ struct PostCellView: View {
         .cornerRadius(8)
     }
 
+    /// Блок репоста: автор, текст и превью фото из первого элемента copy_history.
+    @ViewBuilder
+    private func repostBlock(_ repost: VKPost) -> some View {
+        let repostAuthorName = CleanFeedVK.authorName(for: repost, profiles: profiles, groups: groups)
+        let repostAvatarURL = CleanFeedVK.authorAvatarURL(for: repost, profiles: profiles, groups: groups)
+        let repostPhotoURLs = (repost.attachments ?? []).compactMap { $0.photo?.feedPreviewURL ?? $0.photo?.displayURL }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let urlString = repostAvatarURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFill()
+                        default: Image(systemName: "person.circle.fill").resizable().foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                Text("Репост от \(repostAuthorName)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
+            }
+            if !repost.text.isEmpty {
+                Text(repost.text)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !repostPhotoURLs.isEmpty {
+                let columns = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(Array(repostPhotoURLs.prefix(6).enumerated()), id: \.offset) { _, urlString in
+                        if let url = URL(string: urlString) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image): image.resizable().scaledToFill()
+                                case .failure, .empty: Color(.systemGray5)
+                                @unknown default: Color(.systemGray5)
+                                }
+                            }
+                            .frame(height: 80)
+                            .clipped()
+                            .cornerRadius(4)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+    }
+
     // MARK: - Лайки / комментарии (счётчики)
 
     private var displayLikesCount: Int {
@@ -484,6 +562,10 @@ struct PostCellView: View {
 
     private var displayIsLiked: Bool {
         isLikedOverride ?? (post.likes?.userLikes == 1)
+    }
+
+    private var displayRepostsCount: Int {
+        repostsCountOverride ?? post.repostsCount
     }
 
     private var likesCommentsRow: some View {
@@ -517,6 +599,31 @@ struct PostCellView: View {
                 Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+            if displayRepostsCount > 0 || onRepostToWall != nil {
+                if let toWall = onRepostToWall {
+                    Menu {
+                        Button(action: toWall) {
+                            Label("На свою стену", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(repostInProgress)
+                        if onRepostToDM != nil {
+                            Button(action: { onRepostToDM?() }) {
+                                Label("В личку", systemImage: "paperplane")
+                            }
+                        }
+                    } label: {
+                        Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(repostInProgress)
+                } else {
+                    Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
@@ -583,7 +690,7 @@ func authorAvatarURL(for post: VKPost, profiles: [VKProfile], groups: [VKGroup])
 
 // Инициализатор для превью (VKPost из Decoder только)
 extension VKPost {
-    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?, likes: VKPostLikes? = nil, comments: VKPostComments? = nil) {
+    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?, likes: VKPostLikes? = nil, comments: VKPostComments? = nil, reposts: VKPostReposts? = nil) {
         self.id = id
         self.fromId = fromId
         self.ownerId = ownerId
@@ -596,5 +703,6 @@ extension VKPost {
         self.copyHistory = copyHistory
         self.likes = likes
         self.comments = comments
+        self.reposts = reposts
     }
 }

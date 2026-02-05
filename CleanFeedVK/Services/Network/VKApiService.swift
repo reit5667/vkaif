@@ -363,12 +363,13 @@ final class VKApiService: Sendable {
 
     // MARK: - wall.get
 
-    /// Стена: посты группы (ownerId < 0) или пользователя (ownerId > 0).
+    /// Стена: посты группы (ownerId < 0) или пользователя (ownerId > 0). extended=1 — profiles и groups для имён/аватаров репостов.
     func getWall(
         token: String,
         ownerId: Int,
         count: Int = 20,
-        offset: Int = 0
+        offset: Int = 0,
+        extended: Int = 1
     ) async throws -> WallGetResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -376,7 +377,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "owner_id", value: String(ownerId)),
             URLQueryItem(name: "count", value: String(count)),
-            URLQueryItem(name: "offset", value: String(offset))
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "extended", value: String(extended))
         ]
         guard var components = URLComponents(string: "\(baseURL)/wall.get") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
@@ -652,6 +654,31 @@ final class VKApiService: Sendable {
             }
             throw error
         }
+    }
+
+    // MARK: - wall.repost
+
+    /// Репост записи на свою стену. object — строка "wall{owner_id}_{post_id}" (владелец исходного поста и id поста).
+    /// Возвращает success, post_id на стене пользователя и reposts_count (новый счётчик репостов исходного поста).
+    func wallRepost(
+        token: String,
+        object: String
+    ) async throws -> WallRepostResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "object", value: object)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.repost") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.repost object=\(object)")
+        let response = try await requestVK(WallRepostResponse.self, from: request)
+        logger?.info("VKApi", "wall.repost ok success=\(response.success) repostsCount=\(response.repostsCount ?? -1)")
+        return response
     }
 
     // MARK: - wall.createComment

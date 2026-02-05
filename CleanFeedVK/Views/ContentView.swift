@@ -35,6 +35,10 @@ struct ContentView: View {
     /// Переопределения опросов после голосования. Ключ: "ownerId_postId_pollId".
     @State private var pollVoteOverrides: [String: PollVoteOverride] = [:]
     @State private var pollVoteInProgress: Set<String> = []
+    /// Переопределения счётчика репостов после wall.repost (postId -> count).
+    @State private var postRepostOverrides: [String: Int] = [:]
+    @State private var repostInProgress: Set<String> = []
+    @State private var showRepostDMStub = false
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -94,6 +98,8 @@ struct ContentView: View {
                     nextFrom = nil
                     postLikeOverrides = [:]
                     postLikedOverrides = [:]
+                    postRepostOverrides = [:]
+                    repostInProgress = []
                     pollVoteOverrides = [:]
                     pollVoteInProgress = []
                 }
@@ -107,48 +113,7 @@ struct ContentView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(feedPosts, id: \.postId) { post in
-                    PostCellView(
-                        post: post,
-                        authorName: authorName(for: post),
-                        authorAvatarURL: authorAvatarURL(for: post),
-                        relativeDate: relativeDateString(from: post.date),
-                        authService: authService,
-                        feedDestination: feedDestination(for: post),
-                        onTapComments: {
-                            commentsContext = PostCommentsContext(
-                                ownerId: post.ownerId ?? post.fromId ?? 0,
-                                postId: post.id,
-                                totalCount: post.commentsCount
-                            )
-                        },
-                        likesCountOverride: postLikeOverrides[post.postId],
-                        isLikedOverride: postLikedOverrides[post.postId],
-                        onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
-                        likeInProgress: likeInProgress.contains(post.postId),
-                        onTapVideo: { video, ownerId, post in
-                            var url: URL?
-                            if let p = video.player, let u = URL(string: p) {
-                                url = u
-                            } else {
-                                let token = await MainActor.run { authService.accessToken } ?? ""
-                                if !token.isEmpty,
-                                   let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
-                                   let first = res.items.first,
-                                   let playerURL = first.player {
-                                    url = URL(string: playerURL)
-                                }
-                            }
-                            await MainActor.run {
-                                videoPlayerURL = url
-                                videoPlayerPost = post
-                            }
-                        },
-                        pollVoteOverrides: pollVoteOverrides,
-                        onPollVote: { p, poll, answerId in pollVote(post: p, poll: poll, answerId: answerId) },
-                        pollVoteInProgress: pollVoteInProgress,
-                        onAddToSaved: { ownerId, photoId in await addPhotoToSaved(ownerId: ownerId, photoId: photoId) }
-                    )
-                    .padding(.vertical, 8)
+                    feedPostRow(post)
                     Divider()
                 }
 
@@ -193,6 +158,11 @@ struct ContentView: View {
                     .background(.ultraThinMaterial)
                     .cornerRadius(8)
             }
+        }
+        .alert("Репост в личку", isPresented: $showRepostDMStub) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Скоро. Раздел сообщений в разработке.")
         }
     }
 
@@ -245,6 +215,61 @@ struct ContentView: View {
         } else {
             return .user(id: id)
         }
+    }
+
+    private func feedPostRow(_ post: VKPost) -> some View {
+        let repostCount = postRepostOverrides[post.postId]
+        let repostLoading = repostInProgress.contains(post.postId)
+        let repostToWallAction: (() -> Void)? = repostLoading ? nil : { repostToWall(post) }
+        return PostCellView(
+            post: post,
+            authorName: authorName(for: post),
+            authorAvatarURL: authorAvatarURL(for: post),
+            relativeDate: relativeDateString(from: post.date),
+            profiles: feedProfiles,
+            groups: feedGroups,
+            authService: authService,
+            feedDestination: feedDestination(for: post),
+            onTapComments: {
+                commentsContext = PostCommentsContext(
+                    ownerId: post.ownerId ?? post.fromId ?? 0,
+                    postId: post.id,
+                    totalCount: post.commentsCount
+                )
+            },
+            likesCountOverride: postLikeOverrides[post.postId],
+            isLikedOverride: postLikedOverrides[post.postId],
+            onLike: likeInProgress.contains(post.postId) ? nil : { likeToggle(post) },
+            likeInProgress: likeInProgress.contains(post.postId),
+            onTapVideo: { video, ownerId, post in
+                var url: URL?
+                if let p = video.player, let u = URL(string: p) {
+                    url = u
+                } else {
+                    let token = await MainActor.run { authService.accessToken } ?? ""
+                    if !token.isEmpty,
+                       let res = try? await vkApi.getVideo(token: token, videos: video.videoGetId(ownerFallback: ownerId)),
+                       let first = res.items.first,
+                       let playerURL = first.player {
+                        url = URL(string: playerURL)
+                    }
+                }
+                await MainActor.run {
+                    videoPlayerURL = url
+                    videoPlayerPost = post
+                }
+            },
+            pollVoteOverrides: pollVoteOverrides,
+            onPollVote: { p, poll, answerId in pollVote(post: p, poll: poll, answerId: answerId) },
+            pollVoteInProgress: pollVoteInProgress,
+            repostsCountOverride: repostCount,
+            onRepostToWall: repostToWallAction,
+            onRepostToDM: { showRepostDMStub = true },
+            repostInProgress: repostLoading,
+            onAddToSaved: { token, ownerId, photoId, accessKey in await addPhotoToSaved(token: token, ownerId: ownerId, photoId: photoId, accessKey: accessKey) },
+            getAccessToken: { authService.accessToken ?? "" }
+        )
+        .padding(.vertical, 8)
     }
 
     // MARK: - Views
@@ -445,6 +470,30 @@ struct ContentView: View {
         }
     }
 
+    /// Репост поста на свою стену (wall.repost). object = "wall{owner_id}_{post_id}".
+    private func repostToWall(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let pid = post.postId
+        if repostInProgress.contains(pid) { return }
+        repostInProgress.insert(pid)
+        let object = "wall\(ownerId)_\(post.id)"
+        Task {
+            do {
+                let response = try await vkApi.wallRepost(token: token, object: object)
+                await MainActor.run {
+                    if let newCount = response.repostsCount {
+                        postRepostOverrides[pid] = newCount
+                    }
+                    repostInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { repostInProgress.remove(pid) }
+            }
+        }
+    }
+
     private func pollVote(post: VKPost, poll: VKPoll, answerId: Int) {
         guard let token = authService.accessToken else { return }
         let ownerId = poll.ownerId ?? post.ownerId ?? post.fromId ?? 0
@@ -481,15 +530,16 @@ struct ContentView: View {
         }
     }
 
-    private func addPhotoToSaved(ownerId: Int, photoId: Int) async -> Bool {
-        guard let token = authService.accessToken else { return false }
+    private func addPhotoToSaved(token: String, ownerId: Int, photoId: Int, accessKey: String? = nil) async -> Bool {
+        guard !token.isEmpty else {
+            AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
+            return false
+        }
         do {
-            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId)
+            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId, accessKey: accessKey)
             return true
         } catch {
-            #if DEBUG
-            print("[CleanFeedVK] addPhotoToSaved failed: \(error)")
-            #endif
+            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(ownerId) photoId=\(photoId)", error: error)
             return false
         }
     }

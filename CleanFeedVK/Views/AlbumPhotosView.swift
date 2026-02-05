@@ -125,14 +125,23 @@ struct AlbumPhotosView: View {
                     } ?? nil,
                     photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
                     authService: authService,
-                    photoIdsForSaving: photos.map { (ownerId, $0.id) },
-                    onAddToSaved: { oid, pid in
-                        guard let token = authService.accessToken else { return false }
+                    photoIdsForSaving: photos.map { PhotoSaveId(ownerId: ownerId, photoId: $0.id, accessKey: $0.accessKey) },
+                    onAddToSaved: { token, oid, pid, key in
+                        guard !token.isEmpty else {
+                            AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
+                            return false
+                        }
                         do {
-                            _ = try await vkApi.photosCopy(token: token, ownerId: oid, photoId: pid)
+                            _ = try await vkApi.photosCopy(token: token, ownerId: oid, photoId: pid, accessKey: key)
                             return true
-                        } catch { return false }
-                    }
+                        } catch {
+                            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(oid) photoId=\(pid)", error: error)
+                            return false
+                        }
+                    },
+                    getAccessToken: { authService.accessToken ?? "" },
+                    isSavedAlbum: (albumId == -15),
+                    initialAccessToken: authService.accessToken ?? ""
                 )
             }
         }
