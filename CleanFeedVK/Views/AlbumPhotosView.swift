@@ -13,6 +13,8 @@ struct AlbumPhotosView: View {
     let ownerId: Int
     let albumId: Int
     let albumTitle: String
+    /// true = альбом своего профиля (в альбоме «Фото профиля» показывать «Сделать фото профиля»).
+    var isOwnProfile: Bool = false
 
     @State private var photos: [VKPhoto] = []
     @State private var totalCount: Int = 0
@@ -36,6 +38,19 @@ struct AlbumPhotosView: View {
     private var rev: Int { sortNewestFirst ? 1 : 0 }
     private var canLoadMore: Bool {
         loadState == .loaded && loadMoreState != .loading && photos.count < totalCount
+    }
+
+    private var makeProfilePhotoAction: ((String, Int, Int) async -> Bool)? {
+        guard isOwnProfile, albumId == -6 else { return nil }
+        return { [vkApi] token, oid, pid in
+            do {
+                try await vkApi.photosMakeCover(token: token, ownerId: oid, photoId: pid)
+                return true
+            } catch {
+                AppLogger.shared.error("Gallery", "makeProfilePhoto failed", error: error)
+                return false
+            }
+        }
     }
 
     /// Высота spacer внизу сетки = сколько ещё строк фото не подгружено (чтобы контент ScrollView имел запас и скролл опускался).
@@ -109,43 +124,51 @@ struct AlbumPhotosView: View {
             }
         }
         .fullScreenCover(item: $fullScreenPhotoItem) { item in
-            let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
-            let idx = min(item.index, photos.count - 1)
-            let photo = photos.indices.contains(idx) ? photos[idx] : nil
-            if !urls.isEmpty {
-                FullScreenPhotoGalleryView(
-                    urls: urls,
-                    initialIndex: min(item.index, urls.count - 1),
-                    onDismiss: { fullScreenPhotoItem = nil },
-                    likesCount: photo.map { photoLikeOverrides[$0.id] ?? $0.likes?.count ?? 0 } ?? 0,
-                    commentsCount: photo.map { $0.comments?.count ?? 0 } ?? 0,
-                    isLiked: photo.map { photoLikedOverrides[$0.id] ?? ($0.likes?.userLikes == 1) } ?? false,
-                    onLike: photo.map { p in
-                        photoLikeInProgress.contains(p.id) ? nil : { likeTogglePhoto(photoId: p.id) }
-                    } ?? nil,
-                    photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
-                    authService: authService,
-                    photoIdsForSaving: photos.map { PhotoSaveId(ownerId: ownerId, photoId: $0.id, accessKey: $0.accessKey) },
-                    onAddToSaved: { token, oid, pid, key in
-                        guard !token.isEmpty else {
-                            AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
-                            return false
-                        }
-                        do {
-                            _ = try await vkApi.photosCopy(token: token, ownerId: oid, photoId: pid, accessKey: key)
-                            return true
-                        } catch {
-                            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(oid) photoId=\(pid)", error: error)
-                            return false
-                        }
-                    },
-                    getAccessToken: { authService.accessToken ?? "" },
-                    isSavedAlbum: (albumId == -15),
-                    initialAccessToken: authService.accessToken ?? ""
-                )
-            }
+            fullScreenGalleryContent(item: item)
         }
         .onAppear { loadPhotos(offset: 0, append: false) }
+    }
+
+    @ViewBuilder
+    private func fullScreenGalleryContent(item: AlbumFullScreenItem) -> some View {
+        let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+        let idx = min(item.index, photos.count - 1)
+        let photo = photos.indices.contains(idx) ? photos[idx] : nil
+        if !urls.isEmpty {
+            FullScreenPhotoGalleryView(
+                urls: urls,
+                initialIndex: min(item.index, urls.count - 1),
+                onDismiss: { fullScreenPhotoItem = nil },
+                likesCount: photo.map { photoLikeOverrides[$0.id] ?? $0.likes?.count ?? 0 } ?? 0,
+                commentsCount: photo.map { $0.comments?.count ?? 0 } ?? 0,
+                isLiked: photo.map { photoLikedOverrides[$0.id] ?? ($0.likes?.userLikes == 1) } ?? false,
+                onLike: photo.map { p in
+                    photoLikeInProgress.contains(p.id) ? nil : { likeTogglePhoto(photoId: p.id) }
+                } ?? nil,
+                photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
+                authService: authService,
+                photoIdsForSaving: photos.map { PhotoSaveId(ownerId: ownerId, photoId: $0.id, accessKey: $0.accessKey) },
+                onAddToSaved: { token, oid, pid, key in
+                    guard !token.isEmpty else {
+                        AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
+                        return false
+                    }
+                    do {
+                        _ = try await vkApi.photosCopy(token: token, ownerId: oid, photoId: pid, accessKey: key)
+                        return true
+                    } catch {
+                        AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(oid) photoId=\(pid)", error: error)
+                        return false
+                    }
+                },
+                getAccessToken: { authService.accessToken ?? "" },
+                isSavedAlbum: (albumId == -15),
+                initialAccessToken: authService.accessToken ?? "",
+                isOwnPhotos: isOwnProfile,
+                isProfileAlbum: (albumId == -6),
+                onMakeProfilePhoto: makeProfilePhotoAction
+            )
+        }
     }
 
     private func photoCell(_ photo: VKPhoto, index: Int) -> some View {

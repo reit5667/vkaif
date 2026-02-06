@@ -261,7 +261,11 @@ struct ContentView: View {
         let deletePhotoClosure: (String, Int, Int) async -> Bool = { token, ownerId, photoId in
             await deletePhotoFromPost(token: token, ownerId: ownerId, photoId: photoId)
         }
+        let makeProfilePhotoClosure: (String, Int, Int) async -> Bool = { token, ownerId, photoId in
+            await makeProfilePhotoFromPost(token: token, ownerId: ownerId, photoId: photoId)
+        }
         let onDeletePhotoAction: ((String, Int, Int) async -> Bool)? = isOwnPost ? Optional(deletePhotoClosure) : nil
+        let onMakeProfilePhotoAction: ((String, Int, Int) async -> Bool)? = isOwnPost ? Optional(makeProfilePhotoClosure) : nil
         return FeedPostRowCell(
             post: post,
             authorName: authorName(for: post),
@@ -288,9 +292,21 @@ struct ContentView: View {
             onDelete: onDeleteAction,
             deleteInProgress: deleteInProgress.contains(post.postId),
             onDeletePhoto: onDeletePhotoAction,
+            onMakeProfilePhoto: onMakeProfilePhotoAction,
             onAddToSaved: addPhotoToSaved,
             getAccessToken: { authService.accessToken ?? "" }
         )
+    }
+
+    /// Сделать фото главным в профиле (photos.makeCover). Для своих постов из fullscreen галереи.
+    private func makeProfilePhotoFromPost(token: String, ownerId: Int, photoId: Int) async -> Bool {
+        do {
+            try await vkApi.photosMakeCover(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch {
+            AppLogger.shared.error("Feed", "makeProfilePhoto failed", error: error)
+            return false
+        }
     }
 
     /// Удаление фото (photos.delete). Для своих постов из fullscreen галереи. Возвращает true при успехе.

@@ -58,7 +58,10 @@ struct PostCellView: View {
     var deleteInProgress: Bool = false
     /// Удалить фото в fullscreen галерее (свои фото). (token, ownerId, photoId) → true при успехе. nil = пункт не показывать.
     var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
+    /// Сделать фото главным в профиле (photos.makeCover). Показываем для своих фото. nil = пункт не показывать.
+    var onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
 
+    @Environment(\.makeProfilePhotoForGallery) private var makeProfilePhotoFromEnvironment
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
     private let textLineLimitCollapsed = 3
@@ -180,7 +183,9 @@ struct PostCellView: View {
         let deletePhoto: ((String, Int, Int) async -> Bool)? = canDeletePost
             ? onDeletePhoto
             : nil as ((String, Int, Int) async -> Bool)?
-        return FullScreenPhotoGalleryView(
+        let photoIds: [PhotoSaveId]? = photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost
+        let makeProfile: ((String, Int, Int) async -> Bool)? = canDeletePost ? (onMakeProfilePhoto ?? makeProfilePhotoFromEnvironment) : nil as ((String, Int, Int) async -> Bool)?
+        let gallery: FullScreenPhotoGalleryView = FullScreenPhotoGalleryView(
             urls: photoDisplayURLsAsURLs,
             initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
             onDismiss: { fullScreenPhotoIndex = nil },
@@ -191,13 +196,16 @@ struct PostCellView: View {
             onTapComments: onTapComments,
             postCommentsContext: postContext,
             authService: authService,
-            photoIdsForSaving: photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost,
+            photoIdsForSaving: photoIds,
             onAddToSaved: addToSaved,
             getAccessToken: getAccessToken,
             initialAccessToken: getAccessToken?() ?? "",
             isOwnPhotos: canDeletePost,
-            onDeletePhoto: deletePhoto
+            onDeletePhoto: deletePhoto,
+            isProfileAlbum: canDeletePost,
+            onMakeProfilePhoto: makeProfile
         )
+        return gallery
     }
 
     // MARK: - Header (тап → группа или профиль, если передан feedDestination)

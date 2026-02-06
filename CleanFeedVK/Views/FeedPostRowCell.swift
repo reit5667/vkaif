@@ -27,6 +27,7 @@ struct FeedPostRowCell: View {
     let onDelete: (() -> Void)?
     let deleteInProgress: Bool
     let onDeletePhoto: ((String, Int, Int) async -> Bool)?
+    var onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
     let onAddToSaved: (String, Int, Int, String?) async -> Bool
     let getAccessToken: () -> String
 
@@ -57,6 +58,7 @@ struct FeedPostRowCell: View {
             onDelete: onDelete,
             deleteInProgress: deleteInProgress,
             onDeletePhoto: onDeletePhoto,
+            onMakeProfilePhoto: onMakeProfilePhoto,
             onAddToSaved: onAddToSaved,
             getAccessToken: getAccessToken
         )

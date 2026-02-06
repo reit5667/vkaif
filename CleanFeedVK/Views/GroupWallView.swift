@@ -39,7 +39,7 @@ struct GroupWallView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded:
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: 12) {
                         if let g = group {
                             groupHeader(group: g)
                         }

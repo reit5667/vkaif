@@ -90,6 +90,10 @@ struct FullScreenPhotoGalleryView: View {
     var isOwnPhotos: Bool = false
     /// Удалить текущее фото (token, ownerId, photoId). Возвращает true при успехе. nil = пункт не показывать.
     var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
+    /// true = альбом «Фото профиля» (-6): показывать пункт «Сделать фото профиля» для своих фото.
+    var isProfileAlbum: Bool = false
+    /// Сделать текущее фото главным в профиле (photos.makeCover). (token, ownerId, photoId). nil = пункт не показывать.
+    var onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
@@ -109,6 +113,7 @@ struct FullScreenPhotoGalleryView: View {
     /// Токен, захваченный при открытии панели «три точки» — чтобы в fullScreenCover не терять.
     @State private var capturedTokenForSave: String = ""
     @State private var deletePhotoInProgress = false
+    @State private var makeProfilePhotoInProgress = false
 
     init(
         urls: [URL],
@@ -128,7 +133,9 @@ struct FullScreenPhotoGalleryView: View {
         isSavedAlbum: Bool = false,
         initialAccessToken: String = "",
         isOwnPhotos: Bool = false,
-        onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
+        onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil,
+        isProfileAlbum: Bool = false,
+        onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -148,6 +155,8 @@ struct FullScreenPhotoGalleryView: View {
         self.initialAccessToken = initialAccessToken
         self.isOwnPhotos = isOwnPhotos
         self.onDeletePhoto = onDeletePhoto
+        self.isProfileAlbum = isProfileAlbum
+        self.onMakeProfilePhoto = onMakeProfilePhoto
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
         _capturedTokenForSave = State(initialValue: initialAccessToken)
     }
@@ -209,6 +218,30 @@ struct FullScreenPhotoGalleryView: View {
                         .ignoresSafeArea()
                         .onTapGesture { showActionsOverlay = false }
                     VStack(spacing: 0) {
+                        if isOwnPhotos, isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
+                            Button {
+                                let item = ids[currentIndex]
+                                let token = capturedTokenForSave.isEmpty ? (getAccessToken?() ?? authService?.accessToken ?? "") : capturedTokenForSave
+                                guard !token.isEmpty, !makeProfilePhotoInProgress else { showActionsOverlay = false; return }
+                                makeProfilePhotoInProgress = true
+                                Task {
+                                    let ok = await makeProfile(token, item.ownerId, item.photoId)
+                                    await MainActor.run {
+                                        makeProfilePhotoInProgress = false
+                                        showActionsOverlay = false
+                                        if ok { onDismiss() }
+                                    }
+                                }
+                            } label: {
+                                Label(makeProfilePhotoInProgress ? "Сохранение…" : "Сделать фото профиля", systemImage: "person.crop.circle")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(makeProfilePhotoInProgress)
+                            Divider()
+                        }
                         if isOwnPhotos, let deletePhoto = onDeletePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
                             Button {
                                 let item = ids[currentIndex]
@@ -232,7 +265,8 @@ struct FullScreenPhotoGalleryView: View {
                             .buttonStyle(.plain)
                             .disabled(deletePhotoInProgress)
                             Divider()
-                        } else if !isOwnPhotos && !isSavedAlbum {
+                        }
+                        if !isOwnPhotos && !isSavedAlbum {
                             Button {
                                 guard let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone else {
                                     showActionsOverlay = false
@@ -388,7 +422,7 @@ struct FullScreenPhotoGalleryView: View {
             .padding(.leading, 16)
             .padding(.top, 8)
             Spacer(minLength: 0)
-            if !isSavedAlbum || (isOwnPhotos && onDeletePhoto != nil) {
+            if !isSavedAlbum || (isOwnPhotos && (onDeletePhoto != nil || onMakeProfilePhoto != nil)) {
             Button {
                 if capturedTokenForSave.isEmpty {
                     capturedTokenForSave = getAccessToken?() ?? authService?.accessToken ?? ""

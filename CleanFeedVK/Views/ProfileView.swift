@@ -127,6 +127,7 @@ struct ProfileView: View {
                 loadState: viewModel.albumsLoadState,
                 authService: authService,
                 ownerId: user.id,
+                isOwnProfile: userId == nil,
                 onRefresh: { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: true) }
             )
         case .friends:

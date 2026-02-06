@@ -24,19 +24,26 @@ struct ProfileWallPostCell: View {
     let onRepostDM: () -> Void
     let onDelete: () -> Void
     let onDeletePhoto: (String, Int, Int) async -> Bool
+    /// Сделать фото главным в профиле (photos.makeCover). nil = пункт не показывать.
+    var onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
     let onAddToSaved: (String, Int, Int, String?) async -> Bool
     let getAccessToken: () -> String
 
     var body: some View {
-        makeCell().padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+        cellView
+            .environment(\.makeProfilePhotoForGallery, isOwnProfile ? onMakeProfilePhoto : nil as ((String, Int, Int) async -> Bool)?)
+            .padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
     }
 
-    private func makeCell() -> PostCellView {
+    private var cellView: PostCellView {
+        let onLikeArg: (() -> Void)? = likeInProgress ? nil as (() -> Void)? : onLike
+        let onDeleteArg: (() -> Void)? = (isOwnProfile && onDeletePost != nil) ? onDelete : nil as (() -> Void)?
+        let onDeletePhotoArg: ((String, Int, Int) async -> Bool)? = isOwnProfile ? onDeletePhoto : nil as ((String, Int, Int) async -> Bool)?
+        let feedDest: FeedDestination? = nil
         let tapVideo: (VKVideo, Int, VKPost) async -> Void = onTapVideo
-        let deletePhoto: ((String, Int, Int) async -> Bool)? = isOwnProfile ? Optional(onDeletePhoto) : nil
-        let addToSaved: (String, Int, Int, String?) async -> Bool = onAddToSaved
         let tokenProvider: () -> String = getAccessToken
-        return PostCellView(
+        let addToSaved: (String, Int, Int, String?) async -> Bool = onAddToSaved
+        let view: PostCellView = PostCellView(
             post: post,
             authorName: user.displayName,
             authorAvatarURL: user.avatarURL,
@@ -44,11 +51,11 @@ struct ProfileWallPostCell: View {
             profiles: profiles,
             groups: groups,
             authService: authService,
-            feedDestination: nil,
+            feedDestination: feedDest,
             onTapComments: onTapComments,
             likesCountOverride: postLikeOverrides,
             isLikedOverride: postLikedOverrides,
-            onLike: likeInProgress ? nil : onLike,
+            onLike: onLikeArg,
             likeInProgress: likeInProgress,
             onTapVideo: tapVideo,
             pollVoteOverrides: nil,
@@ -59,11 +66,12 @@ struct ProfileWallPostCell: View {
             onRepostToDM: onRepostDM,
             repostInProgress: repostLoading,
             canDeletePost: isOwnProfile && onDeletePost != nil,
-            onDelete: (isOwnProfile && onDeletePost != nil) ? onDelete : nil,
+            onDelete: onDeleteArg,
             deleteInProgress: deleteInProgress,
-            onDeletePhoto: deletePhoto,
+            onDeletePhoto: onDeletePhotoArg,
             onAddToSaved: addToSaved,
             getAccessToken: tokenProvider
         )
+        return view
     }
 }

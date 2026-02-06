@@ -522,6 +522,31 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "photos.delete ok")
     }
 
+    // MARK: - photos.makeCover
+
+    /// Сделать фото обложкой альбома (для альбома «Фото профиля» (-6) — главное фото в шапке). owner_id — пользователь, photo_id — id фото в альбоме.
+    func photosMakeCover(
+        token: String,
+        ownerId: Int,
+        photoId: Int
+    ) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "photo_id", value: String(photoId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.makeCover") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "photos.makeCover ownerId=\(ownerId) photoId=\(photoId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "photos.makeCover ok")
+    }
+
     // MARK: - video.get
 
     /// Получить видео по идентификатору "owner_id_video_id" (например "123_456"). Возвращает превью (image/first_frame) и player URL.

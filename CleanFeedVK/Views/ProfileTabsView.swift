@@ -42,8 +42,12 @@ struct ProfileWallTabView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(posts, id: \.postId) { post in
-                                profileWallPostRow(post)
-                                Divider()
+                                VStack(spacing: 0) {
+                                    profileWallPostRow(post)
+                                    Divider()
+                                }
+                                .padding(.top, 16)
+                                .padding(.bottom, 16)
                             }
                         }
                         .padding(.horizontal)
@@ -147,6 +151,7 @@ struct ProfileWallTabView: View {
             onRepostDM: { showRepostDMStub = true },
             onDelete: { deletePost(post) },
             onDeletePhoto: { token, oid, pid in await deletePhotoFromPost(token: token, ownerId: oid, photoId: pid) },
+            onMakeProfilePhoto: { token, oid, pid in await makeProfilePhoto(token: token, ownerId: oid, photoId: pid) },
             onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
             getAccessToken: { authService.accessToken ?? "" }
         )
@@ -249,6 +254,17 @@ struct ProfileWallTabView: View {
             return false
         }
     }
+
+    private func makeProfilePhoto(token: String, ownerId: Int, photoId: Int) async -> Bool {
+        guard !token.isEmpty else { return false }
+        do {
+            try await vkApi.photosMakeCover(token: token, ownerId: ownerId, photoId: photoId)
+            return true
+        } catch {
+            AppLogger.shared.error("ProfileWall", "makeProfilePhoto failed", error: error)
+            return false
+        }
+    }
 }
 
 // MARK: - Вкладка «Фото»: альбомы + Сохранённые (данные передаются из ProfileView)
@@ -258,6 +274,8 @@ struct ProfilePhotoTabView: View {
     let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
     let ownerId: Int
+    /// true = свой профиль (в альбоме «Фото профиля» показывать «Сделать фото профиля»).
+    var isOwnProfile: Bool = false
     var onRefresh: () async -> Void
 
     private static let savedAlbumId = -15
@@ -273,16 +291,16 @@ struct ProfilePhotoTabView: View {
             case .loaded:
                 List {
                     Section {
-                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.savedAlbumId, title: "Сохранённые фото")) {
+                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.savedAlbumId, title: "Сохранённые фото", isOwnProfile: isOwnProfile)) {
                             Label("Сохранённые фото", systemImage: "square.and.arrow.down.fill")
                         }
-                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.profileAlbumId, title: "Фото профиля")) {
+                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.profileAlbumId, title: "Фото профиля", isOwnProfile: isOwnProfile)) {
                             Label("Фото профиля", systemImage: "person.crop.rectangle.stack")
                         }
                     }
                     Section("Альбомы") {
                         ForEach(albums, id: \.id) { album in
-                            NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: album.id, title: album.title)) {
+                            NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: album.id, title: album.title, isOwnProfile: isOwnProfile)) {
                                 HStack(spacing: 12) {
                                     albumThumb(album)
                                     VStack(alignment: .leading, spacing: 2) {
@@ -312,7 +330,8 @@ struct ProfilePhotoTabView: View {
                 authService: authService,
                 ownerId: dest.ownerId,
                 albumId: dest.albumId,
-                albumTitle: dest.title
+                albumTitle: dest.title,
+                isOwnProfile: dest.isOwnProfile
             )
         }
     }
@@ -344,6 +363,8 @@ struct AlbumDestination: Hashable {
     let ownerId: Int
     let albumId: Int
     let title: String
+    /// true = альбом своего профиля (показывать «Сделать фото профиля» в альбоме -6).
+    let isOwnProfile: Bool
 }
 
 /// Цель навигации из вкладки «Группы» профиля (отдельно от Int для друзей).
