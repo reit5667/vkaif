@@ -40,14 +40,17 @@ struct ProfileWallTabView: View {
                     ContentUnavailableView("Нет записей", systemImage: "doc.text")
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 0) {
+                        LazyVStack(spacing: 28) {
                             ForEach(posts, id: \.postId) { post in
                                 VStack(spacing: 0) {
                                     profileWallPostRow(post)
                                     Divider()
                                 }
-                                .padding(.top, 16)
-                                .padding(.bottom, 16)
+                                .padding(.top, 20)
+                                .padding(.bottom, 20)
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemBackground))
+                                .clipped()
                             }
                         }
                         .padding(.horizontal)

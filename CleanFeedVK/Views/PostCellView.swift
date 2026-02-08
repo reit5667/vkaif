@@ -229,9 +229,11 @@ struct PostCellView: View {
                     }
                     .disabled(deleteInProgress)
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis")
                         .font(.body)
+                        .fontWeight(.medium)
                         .foregroundColor(.secondary)
+                        .symbolRenderingMode(.monochrome)
                 }
                 .disabled(deleteInProgress)
             }
@@ -302,7 +304,7 @@ struct PostCellView: View {
     // MARK: - Media
 
 
-    /// Сетка фото: 1 — во всю ширину, 2 — два столбца, 3+ — до 3 столбцов.
+    /// Сетка фото: 1 — во всю ширину с фиксированным aspect ratio (высота ячейки не меняется после загрузки). 2+ — фиксированная высота строки.
     private var photoGridView: some View {
         let count = photoThumbnailURLs.count
         let columnsCount = count == 1 ? 1 : (count == 2 ? 2 : min(3, count))
@@ -311,31 +313,40 @@ struct PostCellView: View {
         return LazyVGrid(columns: columns, spacing: 4) {
             ForEach(Array(photoThumbnailURLs.enumerated()), id: \.offset) { index, urlString in
                 if let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure:
-                            Image(systemName: "photo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .foregroundColor(.secondary)
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            ProgressView()
-                        }
-                    }
-                    .frame(minHeight: count == 1 ? 200 : 120)
-                    .frame(maxWidth: count == 1 ? .infinity : nil)
-                    .clipped()
-                    .cornerRadius(8)
-                    .onTapGesture { fullScreenPhotoIndex = index }
+                    photoThumbnailCell(url: url, index: index, singlePhoto: count == 1)
                 }
             }
         }
+    }
+
+    /// Максимальная высота превью одного фото в ленте (длинные картинки обрезаются, лайки/комменты всегда помещаются).
+    private let singlePhotoMaxHeight: CGFloat = 360
+
+    /// Одна ячейка фото: контейнер с ограниченной высотой (миниатюра), чтобы длинные картинки не заезжали на следующий пост.
+    private func photoThumbnailCell(url: URL, index: Int, singlePhoto: Bool) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            case .failure:
+                Image(systemName: "photo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundColor(.secondary)
+            case .empty:
+                ProgressView()
+            @unknown default:
+                ProgressView()
+            }
+        }
+        .id(url.absoluteString)
+        .frame(maxWidth: singlePhoto ? .infinity : nil)
+        .frame(height: singlePhoto ? singlePhotoMaxHeight : 120)
+        .clipped()
+        .cornerRadius(8)
+        .onTapGesture { fullScreenPhotoIndex = index }
     }
 
     /// Строка видео: превью или плейсхолдер, тап → onTapVideo (плеер). Сетка по центру.
