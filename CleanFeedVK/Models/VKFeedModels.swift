@@ -742,3 +742,146 @@ struct VideoGetResponse: Decodable {
     let count: Int
     let items: [VKVideo]
 }
+
+// MARK: - messages.getConversations / messages.getHistory / messages.send
+
+/// Peer диалога: id — user_id или 2000000000+chat_id для беседы; type: user, chat, group, email.
+struct VKConversationPeer: Decodable {
+    let id: Int
+    let type: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+    }
+}
+
+/// Настройки беседы (название и т.д.), если есть.
+struct VKConversationSettings: Decodable {
+    let title: String?
+}
+
+/// Элемент conversation в getConversations.
+struct VKConversation: Decodable {
+    let peer: VKConversationPeer
+    let chatSettings: VKConversationSettings?
+
+    enum CodingKeys: String, CodingKey {
+        case peer
+        case chatSettings = "chat_settings"
+    }
+}
+
+/// Последнее сообщение в диалоге (getConversations).
+struct VKLastMessage: Decodable {
+    let id: Int
+    let date: Date
+    let fromId: Int
+    let text: String
+    let out: Int?
+    let readState: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case date
+        case fromId = "from_id"
+        case text
+        case out
+        case readState = "read_state"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        let ts = try c.decode(Int.self, forKey: .date)
+        date = Date(timeIntervalSince1970: TimeInterval(ts))
+        fromId = try c.decode(Int.self, forKey: .fromId)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        out = try c.decodeIfPresent(Int.self, forKey: .out)
+        readState = try c.decodeIfPresent(Int.self, forKey: .readState)
+    }
+}
+
+/// Элемент списка диалогов: conversation + last_message.
+struct VKConversationItem: Decodable {
+    let conversation: VKConversation
+    let lastMessage: VKLastMessage
+
+    enum CodingKeys: String, CodingKey {
+        case conversation
+        case lastMessage = "last_message"
+    }
+}
+
+/// Ответ messages.getConversations (extended=1).
+struct MessagesGetConversationsResponse: Decodable {
+    let count: Int
+    let items: [VKConversationItem]
+    let profiles: [VKProfile]?
+    let groups: [VKGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case items
+        case profiles
+        case groups
+    }
+}
+
+/// Сообщение в истории (messages.getHistory).
+struct VKMessage: Decodable {
+    let id: Int
+    let fromId: Int
+    let peerId: Int
+    let date: Date
+    let text: String
+    let out: Int?
+    let readState: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fromId = "from_id"
+        case peerId = "peer_id"
+        case date
+        case text
+        case out
+        case readState = "read_state"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        fromId = try c.decode(Int.self, forKey: .fromId)
+        peerId = try c.decode(Int.self, forKey: .peerId)
+        let ts = try c.decode(Int.self, forKey: .date)
+        date = Date(timeIntervalSince1970: TimeInterval(ts))
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        out = try c.decodeIfPresent(Int.self, forKey: .out)
+        readState = try c.decodeIfPresent(Int.self, forKey: .readState)
+    }
+}
+
+/// Ответ messages.getHistory (extended=1).
+struct MessagesGetHistoryResponse: Decodable {
+    let count: Int
+    let items: [VKMessage]
+    let profiles: [VKProfile]?
+    let groups: [VKGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case items
+        case profiles
+        case groups
+    }
+}
+
+/// Ответ messages.send: response — одно число (message_id). Декодируем через singleValueContainer.
+struct MessagesSendResponse: Decodable {
+    let messageId: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        messageId = try c.decode(Int.self)
+    }
+}

@@ -60,7 +60,7 @@ struct ContentView: View {
                         }
                         .tabItem { Label("Друзья", systemImage: "person.2") }
                         NavigationStack {
-                            MessagesStubView()
+                            MessagesTabView(authService: authService)
                         }
                         .tabItem { Label("Сообщения", systemImage: "bubble.left.and.bubble.right") }
                         NavigationStack {
@@ -655,17 +655,6 @@ private struct FriendsStubView: View {
             description: Text("Раздел в разработке. Список друзей доступен во вкладке «Профиль».")
         )
         .navigationTitle("Друзья")
-    }
-}
-
-private struct MessagesStubView: View {
-    var body: some View {
-        ContentUnavailableView(
-            "Сообщения",
-            systemImage: "bubble.left.and.bubble.right",
-            description: Text("Раздел в разработке.")
-        )
-        .navigationTitle("Сообщения")
     }
 }
 

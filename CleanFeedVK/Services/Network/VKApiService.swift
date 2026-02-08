@@ -799,4 +799,91 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "wall.createComment ok commentId=\(response.commentId)")
         return response.commentId
     }
+
+    // MARK: - messages.getConversations
+
+    /// Список диалогов. filter: all, unread, important и т.д. extended=1 → profiles, groups.
+    func getConversations(
+        token: String,
+        count: Int = 20,
+        offset: Int = 0,
+        filter: String = "all",
+        extended: Int = 1
+    ) async throws -> MessagesGetConversationsResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "filter", value: filter),
+            URLQueryItem(name: "extended", value: String(extended))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.getConversations") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "messages.getConversations offset=\(offset)")
+        let response = try await requestVK(MessagesGetConversationsResponse.self, from: request)
+        logger?.info("VKApi", "messages.getConversations ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - messages.getHistory
+
+    /// История сообщений с peer_id (user или 2000000000+chat_id). extended=1 → profiles, groups.
+    func getHistory(
+        token: String,
+        peerId: Int,
+        count: Int = 20,
+        offset: Int = 0,
+        extended: Int = 1
+    ) async throws -> MessagesGetHistoryResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "extended", value: String(extended))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.getHistory") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "messages.getHistory peerId=\(peerId) offset=\(offset)")
+        let response = try await requestVK(MessagesGetHistoryResponse.self, from: request)
+        logger?.info("VKApi", "messages.getHistory ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - messages.send
+
+    /// Отправить сообщение. random_id — уникальный для дедупликации (например UUID().hashValue).
+    func sendMessage(
+        token: String,
+        peerId: Int,
+        message: String,
+        randomId: Int
+    ) async throws -> Int {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        guard var components = URLComponents(string: "\(baseURL)/messages.send") else { throw VKApiError.invalidURL }
+        components.queryItems = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "message", value: message),
+            URLQueryItem(name: "random_id", value: String(randomId))
+        ]
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "messages.send peerId=\(peerId)")
+        let response = try await requestVK(MessagesSendResponse.self, from: request)
+        logger?.info("VKApi", "messages.send ok messageId=\(response.messageId)")
+        return response.messageId
+    }
 }

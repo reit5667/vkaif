@@ -1,0 +1,167 @@
+import SwiftUI
+
+/// Таб «Сообщения»: список диалогов (getConversations), переход в чат по peer_id.
+struct MessagesTabView: View {
+    @ObservedObject var authService: AuthService
+
+    @State private var items: [VKConversationItem] = []
+    @State private var profiles: [VKProfile] = []
+    @State private var groups: [VKGroup] = []
+    @State private var loadState: LoadState = .idle
+
+    private let vkApi = VKApiService()
+
+    enum LoadState {
+        case idle
+        case loading
+        case loaded
+        case failed(Error)
+    }
+
+    var body: some View {
+        Group {
+            switch loadState {
+            case .idle, .loading:
+                ProgressView("Загрузка диалогов…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .loaded:
+                listContent
+            case .failed(let error):
+                ContentUnavailableView(
+                    "Ошибка",
+                    systemImage: "exclamationmark.triangle.fill",
+                    description: Text(error.localizedDescription)
+                )
+            }
+        }
+        .navigationTitle("Сообщения")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { loadConversations() }
+        .refreshable { loadConversations(force: true) }
+        .navigationDestination(for: ChatDestination.self) { dest in
+            ChatView(peerId: dest.peerId, title: dest.title, authService: authService)
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if items.isEmpty {
+            ContentUnavailableView(
+                "Нет диалогов",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Диалоги появятся здесь.")
+            )
+        } else {
+            List {
+                ForEach(items, id: \.conversation.peer.id) { item in
+                    NavigationLink(value: ChatDestination(peerId: item.conversation.peer.id, title: displayTitle(for: item))) {
+                        HStack(spacing: 12) {
+                            avatarView(url: avatarURL(for: item))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayTitle(for: item))
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Text(item.lastMessage.text)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
+                            Text(shortDate(item.lastMessage.date))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+        }
+    }
+
+    private func displayTitle(for item: VKConversationItem) -> String {
+        let peer = item.conversation.peer
+        if peer.id >= 200_000_0000 {
+            return item.conversation.chatSettings?.title?.trimmingCharacters(in: .whitespaces).isEmpty == false
+                ? (item.conversation.chatSettings?.title ?? "Беседа")
+                : "Беседа"
+        }
+        if let p = profiles.first(where: { $0.id == peer.id }) {
+            let name = [p.firstName, p.lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            return name.isEmpty ? "ID\(p.id)" : name
+        }
+        return "ID\(peer.id)"
+    }
+
+    private func avatarURL(for item: VKConversationItem) -> String? {
+        let peer = item.conversation.peer
+        if peer.id >= 200_000_0000 {
+            return nil
+        }
+        return profiles.first(where: { $0.id == peer.id })?.photo50
+            ?? groups.first(where: { -$0.id == peer.id })?.photo50
+    }
+
+    private func avatarView(url: String?) -> some View {
+        Group {
+            if let urlString = url, let u = URL(string: urlString) {
+                AsyncImage(url: u) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    case .failure, .empty: Image(systemName: "person.circle.fill").resizable().foregroundStyle(.secondary)
+                    @unknown default: EmptyView()
+                    }
+                }
+            } else {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(Circle())
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            return f.string(from: date)
+        }
+        if cal.isDateInYesterday(date) {
+            return "Вчера"
+        }
+        let f = DateFormatter()
+        f.dateFormat = "dd.MM"
+        return f.string(from: date)
+    }
+
+    private func loadConversations(force: Bool = false) {
+        guard let token = authService.accessToken else {
+            loadState = .failed(VKApiError.missingToken)
+            return
+        }
+        if !force, case .loading = loadState { return }
+        loadState = .loading
+        Task {
+            do {
+                let res = try await vkApi.getConversations(token: token, count: 50, offset: 0)
+                await MainActor.run {
+                    items = res.items
+                    profiles = res.profiles ?? []
+                    groups = res.groups ?? []
+                    loadState = .loaded
+                }
+            } catch {
+                await MainActor.run { loadState = .failed(error) }
+            }
+        }
+    }
+}
+
+/// Навигация в чат: peer_id и уже известный заголовок (чтобы не ждать getHistory).
+struct ChatDestination: Hashable {
+    let peerId: Int
+    let title: String
+}
