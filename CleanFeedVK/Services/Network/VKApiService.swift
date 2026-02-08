@@ -53,8 +53,16 @@ final class VKApiService: Sendable {
             logger?.error("VKApi", "API error \(errWrapper.error.errorCode): \(msg)", error: nil)
             throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
         }
-        let wrapper = try decoder.decode(VKResponse<T>.self, from: data)
-        return wrapper.response
+        do {
+            let wrapper = try decoder.decode(VKResponse<T>.self, from: data)
+            return wrapper.response
+        } catch {
+            if let body = String(data: data, encoding: .utf8) {
+                let preview = body.count > 500 ? String(body.prefix(500)) + "…" : body
+                logger?.error("VKApi", "decode failed, response: \(preview)", error: error)
+            }
+            throw error
+        }
     }
 
     // MARK: - newsfeed.get
@@ -524,25 +532,27 @@ final class VKApiService: Sendable {
 
     // MARK: - photos.makeCover
 
-    /// Сделать фото обложкой альбома (для альбома «Фото профиля» (-6) — главное фото в шапке). owner_id — пользователь, photo_id — id фото в альбоме.
+    /// Сделать фото обложкой альбома. Для альбома «Фото профиля» (albumId: -6) — главное фото в шапке профиля. VK API требует album_id.
     func photosMakeCover(
         token: String,
         ownerId: Int,
-        photoId: Int
+        photoId: Int,
+        albumId: Int = -6
     ) async throws {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "owner_id", value: String(ownerId)),
-            URLQueryItem(name: "photo_id", value: String(photoId))
+            URLQueryItem(name: "photo_id", value: String(photoId)),
+            URLQueryItem(name: "album_id", value: String(albumId))
         ]
         guard var components = URLComponents(string: "\(baseURL)/photos.makeCover") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        logger?.info("VKApi", "photos.makeCover ownerId=\(ownerId) photoId=\(photoId)")
+        logger?.info("VKApi", "photos.makeCover ownerId=\(ownerId) photoId=\(photoId) albumId=\(albumId)")
         let _: Int = try await requestVK(Int.self, from: request)
         logger?.info("VKApi", "photos.makeCover ok")
     }

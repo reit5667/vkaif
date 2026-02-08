@@ -40,15 +40,15 @@ struct AlbumPhotosView: View {
         loadState == .loaded && loadMoreState != .loading && photos.count < totalCount
     }
 
-    private var makeProfilePhotoAction: ((String, Int, Int) async -> Bool)? {
+    private var makeProfilePhotoAction: ((String, Int, Int) async -> (Bool, String?))? {
         guard isOwnProfile, albumId == -6 else { return nil }
         return { [vkApi] token, oid, pid in
             do {
-                try await vkApi.photosMakeCover(token: token, ownerId: oid, photoId: pid)
-                return true
+                try await vkApi.photosMakeCover(token: token, ownerId: oid, photoId: pid, albumId: -6)
+                return (true, nil)
             } catch {
                 AppLogger.shared.error("Gallery", "makeProfilePhoto failed", error: error)
-                return false
+                return (false, (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
         }
     }

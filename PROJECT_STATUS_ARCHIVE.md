@@ -51,3 +51,9 @@
 **Отступы на стене и «Сделать фото профиля» (апрув)**
 - Стена: LazyVStack(spacing: 12) в ProfileTabsView (стена профиля) и GroupWallView (стена группы) — посты не накладываются.
 - Сделать фото профиля: VKApiService.photosMakeCover(owner_id, photo_id). В FullScreenPhotoGalleryView добавлены isProfileAlbum, onMakeProfilePhoto; пункт «Сделать фото профиля» в меню «три точки» только для своих фото в альбоме «Фото профиля» (-6). AlbumDestination + isOwnProfile; ProfilePhotoTabView isOwnProfile; AlbumPhotosView передаёт в галерею onMakeProfilePhoto при isOwnProfile && albumId == -6.
+
+**Сессия: отступы стены, миниатюры фото, photos.makeCover (частично)**
+- Отступы стены: LazyVStack(spacing: 12), padding 12; отказ от List (краш recursive layout). Фикс наложения: .frame(maxWidth), .background, .clipped(). Расстояние между постами регулируется (spacing + padding в ProfileTabsView).
+- Превью фото: фиксированная высота — одно фото 360pt (singlePhotoMaxHeight), несколько по 120pt; убрано minHeight, чтобы длинные картинки не заезжали на лайки/след. пост. Иконка меню поста: ellipsis.circle → ellipsis, .symbolRenderingMode(.monochrome).
+- photos.makeCover: в API добавлен album_id (VK требует), везде передаём -6. Callback «Сделать фото профиля» возвращает (Bool, String?) — тост с текстом ошибки VK. FullScreenImageView: тосты «Фото установлено…» / «Не удалось…» или текст ошибки; при пустом токене — «Войдите в аккаунт снова». В requestVK при ошибке декода логируется body ответа. ProfileWallPostCell: передача onMakeProfilePhoto в PostCellView напрямую (без environment) из-за сбоя компилятора; явные приведения nil для типа ((String, Int, Int) async -> (Bool, String?))? в ProfileWallPostCell и PostCellView.
+- Известная проблема: в fullScreenCover при нажатии «Сделать фото профиля» токен приходит пустой («Нет токена доступа»); приоритет токена при тапе: getAccessToken?() ?? authService?.accessToken ?? capturedTokenForSave — не решено, продолжать в след. сессии.

@@ -40,14 +40,14 @@ struct ProfileWallTabView: View {
                     ContentUnavailableView("Нет записей", systemImage: "doc.text")
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 28) {
+                        LazyVStack(spacing: 12) {
                             ForEach(posts, id: \.postId) { post in
                                 VStack(spacing: 0) {
                                     profileWallPostRow(post)
                                     Divider()
                                 }
-                                .padding(.top, 20)
-                                .padding(.bottom, 20)
+                                .padding(.top, 12)
+                                .padding(.bottom, 12)
                                 .frame(maxWidth: .infinity)
                                 .background(Color(.systemBackground))
                                 .clipped()
@@ -258,14 +258,14 @@ struct ProfileWallTabView: View {
         }
     }
 
-    private func makeProfilePhoto(token: String, ownerId: Int, photoId: Int) async -> Bool {
-        guard !token.isEmpty else { return false }
+    private func makeProfilePhoto(token: String, ownerId: Int, photoId: Int) async -> (Bool, String?) {
+        guard !token.isEmpty else { return (false, "Нет токена доступа") }
         do {
-            try await vkApi.photosMakeCover(token: token, ownerId: ownerId, photoId: photoId)
-            return true
+            try await vkApi.photosMakeCover(token: token, ownerId: ownerId, photoId: photoId, albumId: -6)
+            return (true, nil)
         } catch {
             AppLogger.shared.error("ProfileWall", "makeProfilePhoto failed", error: error)
-            return false
+            return (false, (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
 }

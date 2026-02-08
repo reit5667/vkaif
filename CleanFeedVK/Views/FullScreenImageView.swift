@@ -92,8 +92,8 @@ struct FullScreenPhotoGalleryView: View {
     var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
     /// true = альбом «Фото профиля» (-6): показывать пункт «Сделать фото профиля» для своих фото.
     var isProfileAlbum: Bool = false
-    /// Сделать текущее фото главным в профиле (photos.makeCover). (token, ownerId, photoId). nil = пункт не показывать.
-    var onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
+    /// Сделать текущее фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
+    var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
@@ -114,6 +114,9 @@ struct FullScreenPhotoGalleryView: View {
     @State private var capturedTokenForSave: String = ""
     @State private var deletePhotoInProgress = false
     @State private var makeProfilePhotoInProgress = false
+    @State private var showMakeProfileSuccessToast = false
+    @State private var showMakeProfileErrorToast = false
+    @State private var makeProfileErrorText: String = ""
 
     init(
         urls: [URL],
@@ -135,7 +138,7 @@ struct FullScreenPhotoGalleryView: View {
         isOwnPhotos: Bool = false,
         onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil,
         isProfileAlbum: Bool = false,
-        onMakeProfilePhoto: ((String, Int, Int) async -> Bool)? = nil
+        onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -221,15 +224,35 @@ struct FullScreenPhotoGalleryView: View {
                         if isOwnPhotos, isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
                             Button {
                                 let item = ids[currentIndex]
-                                let token = capturedTokenForSave.isEmpty ? (getAccessToken?() ?? authService?.accessToken ?? "") : capturedTokenForSave
-                                guard !token.isEmpty, !makeProfilePhotoInProgress else { showActionsOverlay = false; return }
+                                // Всегда брать актуальный токен в момент нажатия (в fullScreenCover старый capture может быть пустым).
+                                let token = getAccessToken?() ?? authService?.accessToken ?? capturedTokenForSave
+                                guard !token.isEmpty, !makeProfilePhotoInProgress else {
+                                    showActionsOverlay = false
+                                    if token.isEmpty {
+                                        makeProfileErrorText = "Войдите в аккаунт снова"
+                                        showMakeProfileErrorToast = true
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { showMakeProfileErrorToast = false }
+                                    }
+                                    return
+                                }
                                 makeProfilePhotoInProgress = true
                                 Task {
-                                    let ok = await makeProfile(token, item.ownerId, item.photoId)
+                                    let (ok, errorMessage) = await makeProfile(token, item.ownerId, item.photoId)
                                     await MainActor.run {
                                         makeProfilePhotoInProgress = false
                                         showActionsOverlay = false
-                                        if ok { onDismiss() }
+                                        if ok {
+                                            showMakeProfileSuccessToast = true
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                                showMakeProfileSuccessToast = false
+                                            }
+                                        } else {
+                                            makeProfileErrorText = errorMessage ?? "Не удалось установить фото профиля"
+                                            showMakeProfileErrorToast = true
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                                showMakeProfileErrorToast = false
+                                            }
+                                        }
                                     }
                                 }
                             } label: {
@@ -340,6 +363,34 @@ struct FullScreenPhotoGalleryView: View {
                     VStack {
                         Spacer(minLength: 0)
                         Text("Не удалось сохранить")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
+                if showMakeProfileSuccessToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text("Фото установлено как главное в профиле")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
+                if showMakeProfileErrorToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text(makeProfileErrorText)
                             .font(.subheadline)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
