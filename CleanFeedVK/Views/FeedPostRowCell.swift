@@ -26,6 +26,11 @@ struct FeedPostRowCell: View {
     let canDeletePost: Bool
     let onDelete: (() -> Void)?
     let deleteInProgress: Bool
+    let canPinPost: Bool
+    let isPinned: Bool
+    let onPin: (() -> Void)?
+    let onUnpin: (() -> Void)?
+    let pinInProgress: Bool
     let onDeletePhoto: ((String, Int, Int) async -> Bool)?
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
     let onAddToSaved: (String, Int, Int, String?) async -> Bool
@@ -37,6 +42,7 @@ struct FeedPostRowCell: View {
             authorName: authorName,
             authorAvatarURL: authorAvatarURL,
             relativeDate: relativeDate,
+            calendarDate: calendarDateString(from: post.date),
             profiles: profiles,
             groups: groups,
             authService: authService,
@@ -57,6 +63,11 @@ struct FeedPostRowCell: View {
             canDeletePost: canDeletePost,
             onDelete: onDelete,
             deleteInProgress: deleteInProgress,
+            canPinPost: canPinPost,
+            isPinned: isPinned,
+            onPin: onPin,
+            onUnpin: onUnpin,
+            pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhoto,
             onMakeProfilePhoto: onMakeProfilePhoto,
             onAddToSaved: onAddToSaved,

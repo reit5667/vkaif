@@ -261,6 +261,8 @@ struct VKPost: Decodable {
     let comments: VKPostComments?
     /// Счётчик репостов (если вернул API).
     let reposts: VKPostReposts?
+    /// 1 — пост закреплён на стене (wall.get, newsfeed.get).
+    let isPinned: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -276,6 +278,7 @@ struct VKPost: Decodable {
         case likes
         case comments
         case reposts
+        case isPinned = "is_pinned"
     }
 
     init(from decoder: Decoder) throws {
@@ -301,6 +304,7 @@ struct VKPost: Decodable {
             comments = nil
         }
         reposts = try c.decodeIfPresent(VKPostReposts.self, forKey: .reposts)
+        isPinned = try c.decodeIfPresent(Int.self, forKey: .isPinned)
     }
 
     var likesCount: Int { likes?.count ?? 0 }
@@ -858,6 +862,17 @@ struct VKMessage: Decodable {
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         out = try c.decodeIfPresent(Int.self, forKey: .out)
         readState = try c.decodeIfPresent(Int.self, forKey: .readState)
+    }
+
+    /// Локальное сообщение после отправки (оптимистичное отображение).
+    init(id: Int, fromId: Int, peerId: Int, date: Date, text: String, out: Int?, readState: Int?) {
+        self.id = id
+        self.fromId = fromId
+        self.peerId = peerId
+        self.date = date
+        self.text = text
+        self.out = out
+        self.readState = readState
     }
 }
 

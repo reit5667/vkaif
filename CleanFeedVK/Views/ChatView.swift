@@ -15,6 +15,8 @@ struct ChatView: View {
     @State private var inputText: String = ""
     @State private var sending = false
     @State private var sendError: String?
+    @State private var isLoadingMore = false
+    @State private var lastMessageId: Int?
 
     private let vkApi = VKApiService()
     private let pageSize = 30
@@ -71,23 +73,28 @@ struct ChatView: View {
                 } else {
                     ScrollViewReader { proxy in
                         List {
+                            if messages.count < totalCount {
+                                ProgressView("Загрузка старых сообщений…")
+                                    .frame(maxWidth: .infinity)
+                                    .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
+                                    .onAppear { loadMoreHistory() }
+                            }
                             ForEach(messages, id: \.id) { msg in
                                 messageRow(msg)
                                     .id(msg.id)
                             }
-                            if messages.count < totalCount {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                                    .onAppear { loadMoreHistory() }
-                            }
                         }
                         .listStyle(.plain)
-                        .onChange(of: messages.count) { _, _ in
-                            if let last = messages.last {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(last.id, anchor: .bottom)
-                                }
+                        .onChange(of: messages.count) { oldCount, newCount in
+                            let newLastId = messages.last?.id
+                            if newLastId != lastMessageId {
+                                lastMessageId = newLastId
+                                scrollToBottom(proxy: proxy)
                             }
+                        }
+                        .onAppear {
+                            lastMessageId = messages.last?.id
+                            scrollToBottom(proxy: proxy)
                         }
                     }
                 }
@@ -123,11 +130,21 @@ struct ChatView: View {
         .listRowSeparator(.hidden)
     }
 
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        guard let last = messages.last else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(last.id, anchor: .bottom)
+            }
+        }
+    }
+
     private var inputBar: some View {
         HStack(spacing: 8) {
             TextField("Сообщение", text: $inputText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
+                // На симуляторе: I/O → Keyboard → Connect Hardware Keyboard (выкл.), чтобы показать экранную клавиатуру.
             Button {
                 sendMessage()
             } label: {
@@ -168,6 +185,7 @@ struct ChatView: View {
                     profiles = res.profiles ?? []
                     groups = res.groups ?? []
                     loadState = .loaded
+                    lastMessageId = messages.last?.id
                 }
             } catch {
                 await MainActor.run { loadState = .failed(error) }
@@ -177,17 +195,19 @@ struct ChatView: View {
 
     private func loadMoreHistory() {
         guard let token = authService.accessToken else { return }
-        guard case .loaded = loadState, messages.count < totalCount else { return }
+        guard case .loaded = loadState, messages.count < totalCount, !isLoadingMore else { return }
+        isLoadingMore = true
+        let offset = messages.count
         Task {
-            let offset = messages.count
             do {
                 let res = try await vkApi.getHistory(token: token, peerId: peerId, count: pageSize, offset: offset)
                 await MainActor.run {
                     let older = res.items.reversed()
                     messages = older + messages
+                    isLoadingMore = false
                 }
             } catch {
-                // тихо не подгружать дальше при ошибке
+                await MainActor.run { isLoadingMore = false }
             }
         }
     }
@@ -200,11 +220,22 @@ struct ChatView: View {
         let randomId = Int.random(in: 1...Int.max)
         Task {
             do {
-                _ = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: randomId)
+                let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: randomId)
+                let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+                let newMsg = VKMessage(
+                    id: messageId,
+                    fromId: fromId,
+                    peerId: peerId,
+                    date: Date(),
+                    text: text,
+                    out: 1,
+                    readState: nil
+                )
                 await MainActor.run {
                     inputText = ""
                     sending = false
-                    loadHistory(force: true)
+                    messages.append(newMsg)
+                    totalCount += 1
                 }
             } catch {
                 await MainActor.run {

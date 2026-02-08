@@ -17,6 +17,8 @@ struct ProfileWallTabView: View {
 
     @State private var commentsContext: PostCommentsContext? = nil
     @State private var deleteInProgress: Set<String> = []
+    @State private var pinInProgress: Set<String> = []
+    @State private var postPinnedOverrides: [String: Bool] = [:]
     @State private var postLikeOverrides: [String: Int] = [:]
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []
@@ -153,6 +155,10 @@ struct ProfileWallTabView: View {
             onRepostToWall: { repostToWall(post) },
             onRepostDM: { showRepostDMStub = true },
             onDelete: { deletePost(post) },
+            onPin: isOwnProfile ? { pinPost(post) } : nil,
+            onUnpin: isOwnProfile ? { unpinPost(post) } : nil,
+            isPinned: postPinnedOverrides[post.postId] ?? (post.isPinned == 1),
+            pinInProgress: pinInProgress.contains(post.postId),
             onDeletePhoto: { token, oid, pid in await deletePhotoFromPost(token: token, ownerId: oid, photoId: pid) },
             onMakeProfilePhoto: { token, oid, pid in await makeProfilePhoto(token: token, ownerId: oid, photoId: pid) },
             onAddToSaved: { token, oid, pid, key in await addPhotoToSaved(token: token, ownerId: oid, photoId: pid, accessKey: key) },
@@ -176,6 +182,44 @@ struct ProfileWallTabView: View {
                 }
             } catch {
                 await MainActor.run { deleteInProgress.remove(pid) }
+            }
+        }
+    }
+
+    private func pinPost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let oid = post.ownerId ?? post.fromId ?? ownerId
+        let pid = post.postId
+        if pinInProgress.contains(pid) { return }
+        pinInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallPin(token: token, ownerId: oid, postId: post.id)
+                await MainActor.run {
+                    postPinnedOverrides[pid] = true
+                    pinInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { pinInProgress.remove(pid) }
+            }
+        }
+    }
+
+    private func unpinPost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let oid = post.ownerId ?? post.fromId ?? ownerId
+        let pid = post.postId
+        if pinInProgress.contains(pid) { return }
+        pinInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallUnpin(token: token, ownerId: oid, postId: post.id)
+                await MainActor.run {
+                    postPinnedOverrides[pid] = false
+                    pinInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { pinInProgress.remove(pid) }
             }
         }
     }

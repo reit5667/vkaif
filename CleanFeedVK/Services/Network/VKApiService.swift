@@ -767,6 +767,46 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "wall.delete ok")
     }
 
+    // MARK: - wall.pin / wall.unpin
+
+    /// Закрепить пост на стене. owner_id — владелец стены, post_id — id поста. Возвращает 1 при успехе.
+    func wallPin(token: String, ownerId: Int, postId: Int) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "post_id", value: String(postId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.pin") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.pin ownerId=\(ownerId) postId=\(postId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "wall.pin ok")
+    }
+
+    /// Открепить пост со стены.
+    func wallUnpin(token: String, ownerId: Int, postId: Int) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "post_id", value: String(postId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/wall.unpin") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "wall.unpin ownerId=\(ownerId) postId=\(postId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "wall.unpin ok")
+    }
+
     // MARK: - wall.createComment
 
     /// Добавить комментарий к посту. replyTo — id комментария для ответа; nil — корневой комментарий.

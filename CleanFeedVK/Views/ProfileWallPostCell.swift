@@ -23,6 +23,10 @@ struct ProfileWallPostCell: View {
     let onRepostToWall: () -> Void
     let onRepostDM: () -> Void
     let onDelete: () -> Void
+    let onPin: (() -> Void)?
+    let onUnpin: (() -> Void)?
+    let isPinned: Bool
+    let pinInProgress: Bool
     let onDeletePhoto: (String, Int, Int) async -> Bool
     /// Сделать фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
@@ -47,6 +51,7 @@ struct ProfileWallPostCell: View {
             authorName: user.displayName,
             authorAvatarURL: user.avatarURL,
             relativeDate: relativeDateString(from: post.date),
+            calendarDate: calendarDateString(from: post.date),
             profiles: profiles,
             groups: groups,
             authService: authService,
@@ -67,6 +72,11 @@ struct ProfileWallPostCell: View {
             canDeletePost: isOwnProfile && onDeletePost != nil,
             onDelete: onDeleteArg,
             deleteInProgress: deleteInProgress,
+            canPinPost: isOwnProfile,
+            isPinned: isPinned,
+            onPin: onPin,
+            onUnpin: onUnpin,
+            pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhotoArg,
             onMakeProfilePhoto: makeProfile,
             onAddToSaved: addToSaved,

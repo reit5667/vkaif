@@ -42,6 +42,9 @@ struct ContentView: View {
     /// ID текущего пользователя (для показа «Удалить» только у своих постов). Заполняется при loadFeed.
     @State private var currentUserId: Int? = nil
     @State private var deleteInProgress: Set<String> = []
+    @State private var pinInProgress: Set<String> = []
+    /// Переопределение «закреплён» после wall.pin / wall.unpin (postId -> true/false).
+    @State private var postPinnedOverrides: [String: Bool] = [:]
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -291,6 +294,11 @@ struct ContentView: View {
             canDeletePost: isOwnPost,
             onDelete: onDeleteAction,
             deleteInProgress: deleteInProgress.contains(post.postId),
+            canPinPost: isOwnPost,
+            isPinned: postPinnedOverrides[post.postId] ?? (post.isPinned == 1),
+            onPin: { pinPost(post) },
+            onUnpin: { unpinPost(post) },
+            pinInProgress: pinInProgress.contains(post.postId),
             onDeletePhoto: onDeletePhotoAction,
             onMakeProfilePhoto: onMakeProfilePhotoAction,
             onAddToSaved: addPhotoToSaved,
@@ -336,6 +344,48 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run { deleteInProgress.remove(pid) }
+            }
+        }
+    }
+
+    /// Закрепить пост (wall.pin). Только свои посты.
+    private func pinPost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let pid = post.postId
+        if pinInProgress.contains(pid) { return }
+        pinInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallPin(token: token, ownerId: ownerId, postId: post.id)
+                await MainActor.run {
+                    postPinnedOverrides[pid] = true
+                    pinInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { pinInProgress.remove(pid) }
+            }
+        }
+    }
+
+    /// Открепить пост (wall.unpin).
+    private func unpinPost(_ post: VKPost) {
+        guard let token = authService.accessToken else { return }
+        let ownerId = post.ownerId ?? post.fromId ?? 0
+        guard ownerId != 0 else { return }
+        let pid = post.postId
+        if pinInProgress.contains(pid) { return }
+        pinInProgress.insert(pid)
+        Task {
+            do {
+                try await vkApi.wallUnpin(token: token, ownerId: ownerId, postId: post.id)
+                await MainActor.run {
+                    postPinnedOverrides[pid] = false
+                    pinInProgress.remove(pid)
+                }
+            } catch {
+                await MainActor.run { pinInProgress.remove(pid) }
             }
         }
     }

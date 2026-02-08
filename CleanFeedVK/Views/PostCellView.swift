@@ -18,6 +18,8 @@ struct PostCellView: View {
     let authorName: String
     let authorAvatarURL: String?
     let relativeDate: String
+    /// Календарная дата поста (например "15 янв 2025"). nil = не показывать.
+    var calendarDate: String? = nil
     /// Для разрешения автора репоста (copy_history). На стене группы — из wall.get extended=1.
     var profiles: [VKProfile] = []
     var groups: [VKGroup] = []
@@ -56,6 +58,16 @@ struct PostCellView: View {
     var onDelete: (() -> Void)? = nil
     /// true = запрос удаления в процессе (кнопку не нажимать).
     var deleteInProgress: Bool = false
+    /// Показывать «Закрепить пост» / «Открепить» в меню (свой пост на своей стене).
+    var canPinPost: Bool = false
+    /// true = пост закреплён (показывать «Открепить»).
+    var isPinned: Bool = false
+    /// Тап «Закрепить пост». nil = пункт не показывать.
+    var onPin: (() -> Void)? = nil
+    /// Тап «Открепить». nil = пункт не показывать.
+    var onUnpin: (() -> Void)? = nil
+    /// true = запрос закрепления/открепления в процессе.
+    var pinInProgress: Bool = false
     /// Удалить фото в fullscreen галерее (свои фото). (token, ownerId, photoId) → true при успехе. nil = пункт не показывать.
     var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
     /// Сделать фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
@@ -220,14 +232,32 @@ struct PostCellView: View {
                 Text(relativeDate)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                if let cal = calendarDate, !cal.isEmpty {
+                    Text(cal)
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.9))
+                }
             }
             Spacer(minLength: 0)
-            if canDeletePost, onDelete != nil {
+            if (canDeletePost && onDelete != nil) || (canPinPost && (onPin != nil || onUnpin != nil)) {
                 Menu {
-                    Button(role: .destructive, action: { onDelete?() }) {
-                        Label("Удалить", systemImage: "trash")
+                    if canPinPost, isPinned, let unpin = onUnpin {
+                        Button(action: unpin) {
+                            Label("Открепить", systemImage: "pin.slash")
+                        }
+                        .disabled(pinInProgress)
+                    } else if canPinPost, !isPinned, let pin = onPin {
+                        Button(action: pin) {
+                            Label("Закрепить пост", systemImage: "pin")
+                        }
+                        .disabled(pinInProgress)
                     }
-                    .disabled(deleteInProgress)
+                    if canDeletePost, onDelete != nil {
+                        Button(role: .destructive, action: { onDelete?() }) {
+                            Label("Удалить", systemImage: "trash")
+                        }
+                        .disabled(deleteInProgress)
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body)
@@ -235,7 +265,7 @@ struct PostCellView: View {
                         .foregroundColor(.secondary)
                         .symbolRenderingMode(.monochrome)
                 }
-                .disabled(deleteInProgress)
+                .disabled(deleteInProgress || pinInProgress)
             }
         }
     }
@@ -702,6 +732,14 @@ func relativeDateString(from date: Date) -> String {
     return formatter.localizedString(for: date, relativeTo: Date())
 }
 
+/// Календарная дата поста: "15 янв 2025" или "15 января" для отображения в ячейке.
+func calendarDateString(from date: Date) -> String {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "ru_RU")
+    f.dateFormat = "d MMM yyyy"
+    return f.string(from: date)
+}
+
 /// Имя автора поста: из profiles (положительный fromId) или groups (отрицательный ownerId).
 func authorName(for post: VKPost, profiles: [VKProfile], groups: [VKGroup]) -> String {
     let fromId = post.fromId ?? post.ownerId ?? 0
@@ -753,7 +791,7 @@ func authorAvatarURL(for post: VKPost, profiles: [VKProfile], groups: [VKGroup])
 
 // Инициализатор для превью (VKPost из Decoder только)
 extension VKPost {
-    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?, likes: VKPostLikes? = nil, comments: VKPostComments? = nil, reposts: VKPostReposts? = nil) {
+    init(id: Int, fromId: Int?, ownerId: Int?, date: Date, text: String, markedAsAds: Int?, postType: String?, sourceType: String?, attachments: [VKAttachment]?, copyHistory: [VKPost]?, likes: VKPostLikes? = nil, comments: VKPostComments? = nil, reposts: VKPostReposts? = nil, isPinned: Int? = nil) {
         self.id = id
         self.fromId = fromId
         self.ownerId = ownerId
@@ -767,5 +805,6 @@ extension VKPost {
         self.likes = likes
         self.comments = comments
         self.reposts = reposts
+        self.isPinned = isPinned
     }
 }
