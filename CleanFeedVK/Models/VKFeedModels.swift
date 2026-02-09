@@ -682,7 +682,7 @@ struct PhotosGetResponse: Decodable {
     let items: [VKPhoto]
 }
 
-/// Ответ photos.copy — новое фото в «Сохранённых» (owner_id текущего пользователя, id нового фото).
+/// Ответ photos.copy — новое фото в «Сохранённых». VK может вернуть response как число (id фото) или как объект { id, owner_id }.
 struct PhotosCopyResponse: Decodable {
     let id: Int
     let ownerId: Int
@@ -691,6 +691,31 @@ struct PhotosCopyResponse: Decodable {
         case id
         case ownerId = "owner_id"
     }
+
+    init(from decoder: Decoder) throws {
+        // VK иногда возвращает только число (новый photo_id)
+        if let single = try? decoder.singleValueContainer().decode(Int.self) {
+            self.id = single
+            self.ownerId = 0
+            return
+        }
+        let keyed = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try keyed.decode(Int.self, forKey: .id)
+        self.ownerId = try keyed.decodeIfPresent(Int.self, forKey: .ownerId) ?? 0
+    }
+}
+
+/// Ответ photos.getOwnerPhotoUploadServer.
+struct OwnerPhotoUploadServerResponse: Decodable {
+    let uploadUrl: String
+    enum CodingKeys: String, CodingKey { case uploadUrl = "upload_url" }
+}
+
+/// Ответ POST на upload_url (фото профиля). Потом передать в photos.saveOwnerPhoto.
+struct OwnerPhotoUploadResult: Decodable {
+    let server: String?
+    let photo: String?
+    let hash: String?
 }
 
 // MARK: - friends.get
@@ -898,5 +923,21 @@ struct MessagesSendResponse: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         messageId = try c.decode(Int.self)
+    }
+}
+
+/// Ответ photos.getMessagesUploadServer.
+struct MessagesUploadServerResponse: Decodable {
+    let uploadUrl: String
+    enum CodingKeys: String, CodingKey { case uploadUrl = "upload_url" }
+}
+
+/// Один элемент ответа photos.saveMessagesPhoto (owner_id, id для вложения "photo{owner_id}_{id}").
+struct SavedMessagesPhotoItem: Decodable {
+    let id: Int
+    let ownerId: Int
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
     }
 }

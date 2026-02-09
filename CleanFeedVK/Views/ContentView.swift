@@ -301,7 +301,7 @@ struct ContentView: View {
             pinInProgress: pinInProgress.contains(post.postId),
             onDeletePhoto: onDeletePhotoAction,
             onMakeProfilePhoto: onMakeProfilePhotoAction,
-            onAddToSaved: addPhotoToSaved,
+            vkApi: vkApi,
             getAccessToken: { authService.accessToken ?? "" }
         )
     }
@@ -654,15 +654,19 @@ struct ContentView: View {
     }
 
     private func addPhotoToSaved(token: String, ownerId: Int, photoId: Int, accessKey: String? = nil) async -> Bool {
-        guard !token.isEmpty else {
+        let t = token
+        let o = ownerId
+        let p = photoId
+        let a = accessKey ?? ""
+        guard !t.isEmpty else {
             AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
             return false
         }
         do {
-            _ = try await vkApi.photosCopy(token: token, ownerId: ownerId, photoId: photoId, accessKey: accessKey)
+            _ = try await vkApi.photosCopy(token: t, ownerId: o, photoId: p, accessKey: a)
             return true
         } catch {
-            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(ownerId) photoId=\(photoId)", error: error)
+            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(o) photoId=\(p)", error: error)
             return false
         }
     }

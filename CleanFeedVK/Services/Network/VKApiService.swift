@@ -478,11 +478,12 @@ final class VKApiService: Sendable {
     // MARK: - photos.copy
 
     /// Скопировать фото в «Сохранённые» пользователя. owner_id и photo_id — владелец и id фото.
+    /// accessKey — строка (для опционального передавать photo.accessKey ?? ""), чтобы не разыменовывать optional в async и избежать EXC_BAD_ACCESS.
     func photosCopy(
         token: String,
         ownerId: Int,
         photoId: Int,
-        accessKey: String? = nil
+        accessKey: String = ""
     ) async throws -> PhotosCopyResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -491,8 +492,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "owner_id", value: String(ownerId)),
             URLQueryItem(name: "photo_id", value: String(photoId))
         ]
-        if let key = accessKey, !key.isEmpty {
-            queryItems.append(URLQueryItem(name: "access_key", value: key))
+        if !accessKey.isEmpty {
+            queryItems.append(URLQueryItem(name: "access_key", value: accessKey))
         }
         guard var components = URLComponents(string: "\(baseURL)/photos.copy") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
@@ -555,6 +556,66 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "photos.makeCover ownerId=\(ownerId) photoId=\(photoId) albumId=\(albumId)")
         let _: Int = try await requestVK(Int.self, from: request)
         logger?.info("VKApi", "photos.makeCover ok")
+    }
+
+    // MARK: - photos.getOwnerPhotoUploadServer / photos.saveOwnerPhoto (загрузка фото профиля)
+
+    /// Получить URL для загрузки фото профиля (владельца). Дальше POST изображения на upload_url.
+    func getOwnerPhotoUploadServer(token: String) async throws -> String {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.getOwnerPhotoUploadServer") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let response = try await requestVK(OwnerPhotoUploadServerResponse.self, from: request)
+        guard !response.uploadUrl.isEmpty else { throw VKApiError.apiError(code: -1, message: "Пустой upload_url") }
+        return response.uploadUrl
+    }
+
+    /// Сохранить загруженное фото как фото профиля. Параметры — из ответа POST на upload_url.
+    func saveOwnerPhoto(token: String, server: String, hash: String, photo: String) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "server", value: server),
+            URLQueryItem(name: "hash", value: hash),
+            URLQueryItem(name: "photo", value: photo)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.saveOwnerPhoto") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "photos.saveOwnerPhoto ok")
+    }
+
+    /// Загрузить изображение (Data) на upload_url VK (multipart/form-data, поле "photo"). Возвращает server, photo, hash для saveOwnerPhoto.
+    func uploadOwnerPhotoToServer(uploadUrl: String, imageData: Data) async throws -> (server: String, hash: String, photo: String) {
+        guard let url = URL(string: uploadUrl) else { throw VKApiError.invalidURL }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+        let (data, _) = try await network.data(for: request)
+        let result = try decoder.decode(OwnerPhotoUploadResult.self, from: data)
+        guard let server = result.server, let hash = result.hash, let photo = result.photo else {
+            throw VKApiError.apiError(code: -1, message: "Некорректный ответ загрузки")
+        }
+        return (server, hash, photo)
     }
 
     // MARK: - video.get
@@ -902,28 +963,73 @@ final class VKApiService: Sendable {
 
     // MARK: - messages.send
 
-    /// Отправить сообщение. random_id — уникальный для дедупликации (например UUID().hashValue).
+    /// Отправить сообщение. random_id — уникальный для дедупликации. attachment — опционально, например "photo123_456".
     func sendMessage(
         token: String,
         peerId: Int,
         message: String,
-        randomId: Int
+        randomId: Int,
+        attachment: String? = nil
     ) async throws -> Int {
         guard !token.isEmpty else { throw VKApiError.missingToken }
-        guard var components = URLComponents(string: "\(baseURL)/messages.send") else { throw VKApiError.invalidURL }
-        components.queryItems = [
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "peer_id", value: String(peerId)),
             URLQueryItem(name: "message", value: message),
             URLQueryItem(name: "random_id", value: String(randomId))
         ]
+        if let att = attachment, !att.isEmpty {
+            queryItems.append(URLQueryItem(name: "attachment", value: att))
+        }
+        guard var components = URLComponents(string: "\(baseURL)/messages.send") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        logger?.info("VKApi", "messages.send peerId=\(peerId)")
+        logger?.info("VKApi", "messages.send peerId=\(peerId) attachment=\(attachment ?? "nil")")
         let response = try await requestVK(MessagesSendResponse.self, from: request)
         logger?.info("VKApi", "messages.send ok messageId=\(response.messageId)")
         return response.messageId
+    }
+
+    // MARK: - photos.getMessagesUploadServer / photos.saveMessagesPhoto (фото в личку)
+
+    /// URL для загрузки фото в диалог (peer_id — собеседник или беседа).
+    func getMessagesUploadServer(token: String, peerId: Int) async throws -> String {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.getMessagesUploadServer") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let response = try await requestVK(MessagesUploadServerResponse.self, from: request)
+        guard !response.uploadUrl.isEmpty else { throw VKApiError.apiError(code: -1, message: "Пустой upload_url") }
+        return response.uploadUrl
+    }
+
+    /// Сохранить загруженное фото для сообщений. Параметры — из ответа POST на upload_url. Возвращает первый фото (owner_id, id) для attachment.
+    func saveMessagesPhoto(token: String, server: String, hash: String, photo: String) async throws -> SavedMessagesPhotoItem {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "server", value: server),
+            URLQueryItem(name: "hash", value: hash),
+            URLQueryItem(name: "photo", value: photo)
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.saveMessagesPhoto") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let list: [SavedMessagesPhotoItem] = try await requestVK([SavedMessagesPhotoItem].self, from: request)
+        guard let first = list.first else { throw VKApiError.apiError(code: -1, message: "Нет фото в ответе") }
+        return first
     }
 }

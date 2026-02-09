@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 /// Экран профиля: свой или друга. Composition: Header (users.get) + вкладки загружаются асинхронно и независимо через ProfileViewModel.
 /// viewModel: если передан (таб «Профиль» в ContentView) — один экземпляр на всё приложение; иначе создаётся свой (профиль друга).
@@ -10,6 +13,12 @@ struct ProfileView: View {
 
     @State private var selectedTab: ProfileTab = .wall
     @State private var isAvatarFullScreenPresented = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var avatarUploadInProgress = false
+    @State private var avatarUploadMessage: String? = nil
+    @State private var avatarUploadSuccess = false
+
+    private let vkApi = VKApiService()
 
     init(authService: AuthService, viewModel: ProfileViewModel) {
         self.authService = authService
@@ -162,34 +171,88 @@ struct ProfileView: View {
     }
 
     private func avatarSection(user: VKUserDetail) -> some View {
-        Group {
-            if let urlString = user.avatarURL, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        Image(systemName: "person.circle.fill")
-                            .resizable()
-                            .foregroundStyle(.secondary)
-                    case .empty:
-                        ProgressView()
-                    @unknown default:
-                        EmptyView()
+        VStack(spacing: 12) {
+            Group {
+                if let urlString = user.avatarURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Image(systemName: "person.circle.fill")
+                                .resizable()
+                                .foregroundStyle(.secondary)
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            EmptyView()
+                        }
                     }
-                }
-                .frame(width: 120, height: 120)
-                .clipShape(Circle())
-            } else {
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .foregroundStyle(.secondary)
                     .frame(width: 120, height: 120)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 120, height: 120)
+                }
+            }
+            .onTapGesture { isAvatarFullScreenPresented = true }
+
+            if userId == nil {
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label(avatarUploadInProgress ? "Загрузка…" : "Изменить фото профиля", systemImage: "camera.fill")
+                        .font(.subheadline)
+                }
+                .disabled(avatarUploadInProgress)
+                .onChange(of: selectedPhotoItem) { _, newItem in
+                    guard let item = newItem else { return }
+                    Task { await uploadProfilePhoto(from: item) }
+                }
+                if let msg = avatarUploadMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(avatarUploadSuccess ? .green : .red)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
-        .onTapGesture { isAvatarFullScreenPresented = true }
+    }
+
+    private func uploadProfilePhoto(from item: PhotosPickerItem) async {
+        guard let token = authService.accessToken else {
+            await MainActor.run { avatarUploadMessage = "Нет доступа"; avatarUploadSuccess = false }
+            return
+        }
+        await MainActor.run { avatarUploadInProgress = true; avatarUploadMessage = nil }
+        defer { Task { @MainActor in avatarUploadInProgress = false } }
+        do {
+            guard let imageData = try await item.loadTransferable(type: ImageDataTransfer.self) else {
+                await MainActor.run { avatarUploadMessage = "Не удалось загрузить фото"; avatarUploadSuccess = false }
+                return
+            }
+            let jpegData = imageData.dataAsJpeg
+            let uploadUrl = try await vkApi.getOwnerPhotoUploadServer(token: token)
+            let (server, hash, photo) = try await vkApi.uploadOwnerPhotoToServer(uploadUrl: uploadUrl, imageData: jpegData)
+            try await vkApi.saveOwnerPhoto(token: token, server: server, hash: hash, photo: photo)
+            await MainActor.run {
+                avatarUploadMessage = "Фото профиля обновлено"
+                avatarUploadSuccess = true
+                selectedPhotoItem = nil
+                viewModel.refreshAll()
+            }
+        } catch {
+            await MainActor.run {
+                avatarUploadMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                avatarUploadSuccess = false
+            }
+        }
     }
 
     private func nameSection(user: VKUserDetail) -> some View {
@@ -238,6 +301,18 @@ struct ProfileViewWrapper: View {
 
     var body: some View {
         ProfileView(authService: authService, viewModel: viewModel)
+    }
+}
+
+// MARK: - Transferable для загрузки фото из галереи (PhotosPicker)
+private struct ImageDataTransfer: Transferable {
+    let data: Data
+    var dataAsJpeg: Data {
+        guard let ui = UIImage(data: data) else { return data }
+        return ui.jpegData(compressionQuality: 0.9) ?? data
+    }
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(importedContentType: .image) { data in ImageDataTransfer(data: data) }
     }
 }
 

@@ -30,7 +30,7 @@ struct ProfileWallPostCell: View {
     let onDeletePhoto: (String, Int, Int) async -> Bool
     /// Сделать фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
-    let onAddToSaved: (String, Int, Int, String?) async -> Bool
+    let vkApi: VKApiService?
     let getAccessToken: () -> String
 
     var body: some View {
@@ -44,7 +44,6 @@ struct ProfileWallPostCell: View {
         let feedDest: FeedDestination? = nil
         let tapVideo: (VKVideo, Int, VKPost) async -> Void = onTapVideo
         let tokenProvider: () -> String = getAccessToken
-        let addToSaved: (String, Int, Int, String?) async -> Bool = onAddToSaved
         let makeProfile: ((String, Int, Int) async -> (Bool, String?))? = isOwnProfile ? onMakeProfilePhoto : nil as ((String, Int, Int) async -> (Bool, String?))?
         return PostCellView(
             post: post,
@@ -79,7 +78,7 @@ struct ProfileWallPostCell: View {
             pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhotoArg,
             onMakeProfilePhoto: makeProfile,
-            onAddToSaved: addToSaved,
+            vkApi: vkApi,
             getAccessToken: tokenProvider
         )
     }

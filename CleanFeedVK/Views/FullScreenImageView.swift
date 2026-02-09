@@ -1,4 +1,6 @@
 import SwiftUI
+import Photos
+import UIKit
 
 /// Один URL — на весь экран. Если onTap задан — тап переключает панель; иначе тап закрывает.
 struct FullScreenImageView: View {
@@ -78,13 +80,13 @@ struct FullScreenPhotoGalleryView: View {
     var authService: AuthService? = nil
     /// Для «Добавить в сохранённые»: массив в том же порядке, что и urls. nil — пункт скрыт/неактивен.
     var photoIdsForSaving: [PhotoSaveId]? = nil
-    /// Вызов при тапе «Добавить в сохранённые». (token, ownerId, photoId, accessKey). Возвращает true при успехе.
-    var onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil
-    /// Опционально: возврат токена при тапе «Добавить в сохранённые» (надёжнее в fullScreenCover).
+    /// VK API для «Добавить в сохранённые» — галерея сама вызывает photosCopy (без closure, чтобы избежать EXC_BAD_ACCESS).
+    var vkApi: VKApiService? = nil
+    /// Опционально: возврат токена для «Удалить» / «Сделать фото профиля».
     var getAccessToken: (() -> String)? = nil
     /// true = альбом «Сохранённые»: пункт «Добавить в сохранённые» не показываем (VK не даёт копировать из него снова).
     var isSavedAlbum: Bool = false
-    /// Токен на момент открытия галереи (в fullScreenCover getAccessToken часто пуст — передаём сюда при показе).
+    /// Токен на момент открытия галереи (для «Удалить» / «Сделать фото профиля» в fullScreenCover).
     var initialAccessToken: String = ""
     /// true = фото свои (владелец = текущий пользователь): показывать «Удалить», не показывать «Добавить в сохранённые».
     var isOwnPhotos: Bool = false
@@ -117,6 +119,9 @@ struct FullScreenPhotoGalleryView: View {
     @State private var showMakeProfileSuccessToast = false
     @State private var showMakeProfileErrorToast = false
     @State private var makeProfileErrorText: String = ""
+    @State private var saveToDeviceInProgress = false
+    @State private var showSaveToDeviceToast = false
+    @State private var saveToDeviceSuccess = true
 
     init(
         urls: [URL],
@@ -131,7 +136,7 @@ struct FullScreenPhotoGalleryView: View {
         photoCommentsContext: PhotoCommentsContext? = nil,
         authService: AuthService? = nil,
         photoIdsForSaving: [PhotoSaveId]? = nil,
-        onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil,
+        vkApi: VKApiService? = nil,
         getAccessToken: (() -> String)? = nil,
         isSavedAlbum: Bool = false,
         initialAccessToken: String = "",
@@ -152,7 +157,7 @@ struct FullScreenPhotoGalleryView: View {
         self.photoCommentsContext = photoCommentsContext
         self.authService = authService
         self.photoIdsForSaving = photoIdsForSaving
-        self.onAddToSaved = onAddToSaved
+        self.vkApi = vkApi
         self.getAccessToken = getAccessToken
         self.isSavedAlbum = isSavedAlbum
         self.initialAccessToken = initialAccessToken
@@ -291,16 +296,29 @@ struct FullScreenPhotoGalleryView: View {
                         }
                         if !isOwnPhotos && !isSavedAlbum {
                             Button {
-                                guard let ids = photoIdsForSaving, let save = onAddToSaved, currentIndex < ids.count, !addToSavedDone else {
+                                guard let ids = photoIdsForSaving, currentIndex < ids.count, !addToSavedDone, let api = vkApi else {
                                     showActionsOverlay = false
                                     return
                                 }
                                 let item = ids[currentIndex]
-                                let token = capturedTokenForSave.isEmpty ? (getAccessToken?() ?? authService?.accessToken ?? "") : capturedTokenForSave
+                                let token = getAccessToken?() ?? authService?.accessToken ?? initialAccessToken ?? ""
+                                let oid = item.ownerId
+                                let pid = item.photoId
+                                let key = item.accessKey ?? ""
                                 addToSavedInProgress = true
                                 addToSavedFailed = false
                                 Task {
-                                    let ok = await save(token, item.ownerId, item.photoId, item.accessKey)
+                                    var ok = false
+                                    if !token.isEmpty {
+                                        do {
+                                            _ = try await api.photosCopy(token: token, ownerId: oid, photoId: pid, accessKey: key)
+                                            ok = true
+                                        } catch {
+                                            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(oid) photoId=\(pid)", error: error)
+                                        }
+                                    } else {
+                                        AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
+                                    }
                                     await MainActor.run {
                                         addToSavedInProgress = false
                                         showActionsOverlay = false
@@ -327,9 +345,20 @@ struct FullScreenPhotoGalleryView: View {
                                     .foregroundStyle(.primary)
                             }
                             .buttonStyle(.plain)
-                            .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || onAddToSaved == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
+                            .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || vkApi == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
                             Divider()
                         }
+                        Button {
+                            saveCurrentPhotoToDevice()
+                        } label: {
+                            Label(saveToDeviceInProgress ? "Сохранение…" : "Скачать на устройство", systemImage: "square.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(saveToDeviceInProgress)
+                        Divider()
                         Button("Закрыть") {
                             showActionsOverlay = false
                             onDismiss()
@@ -391,6 +420,20 @@ struct FullScreenPhotoGalleryView: View {
                     VStack {
                         Spacer(minLength: 0)
                         Text(makeProfileErrorText)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
+                if showSaveToDeviceToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text(saveToDeviceSuccess ? "Фото сохранено в «Фото»" : "Не удалось сохранить в «Фото»")
                             .font(.subheadline)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
@@ -559,5 +602,49 @@ struct FullScreenPhotoGalleryView: View {
         .padding(.vertical, 16)
         .padding(.bottom, 24)
         .background(Color.black.opacity(0.5))
+    }
+
+    /// Скачать текущее фото по URL и сохранить в «Фото». Требуется NSPhotoLibraryAddUsageDescription в Info.
+    private func saveCurrentPhotoToDevice() {
+        guard currentIndex >= 0, currentIndex < urls.count else { return }
+        let url = urls[currentIndex]
+        saveToDeviceInProgress = true
+        showActionsOverlay = false
+        Task { @MainActor in
+            let success = await saveImageToPhotoLibrary(url: url)
+            saveToDeviceInProgress = false
+            saveToDeviceSuccess = success
+            showSaveToDeviceToast = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                showSaveToDeviceToast = false
+            }
+        }
+    }
+}
+
+// MARK: - Сохранение изображения в «Фото»
+
+/// Сохраняет изображение по URL в альбом «Фото». Вызов на MainActor во избежание крашей с PHPhotoLibrary.
+/// В Target → Info нужен ключ NSPhotoLibraryAddUsageDescription (например: «Сохранение фото в галерею»).
+@MainActor
+private func saveImageToPhotoLibrary(url: URL) async -> Bool {
+    let status = await withCheckedContinuation { (cont: CheckedContinuation<PHAuthorizationStatus, Never>) in
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            cont.resume(returning: status)
+        }
+    }
+    guard status == .authorized || status == .limited else { return false }
+    do {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        guard let image = UIImage(data: data) else { return false }
+        return await withCheckedContinuation { cont in
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }) { success, _ in
+                cont.resume(returning: success)
+            }
+        }
+    } catch {
+        return false
     }
 }

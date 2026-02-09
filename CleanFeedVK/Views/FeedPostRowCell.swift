@@ -33,7 +33,7 @@ struct FeedPostRowCell: View {
     let pinInProgress: Bool
     let onDeletePhoto: ((String, Int, Int) async -> Bool)?
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
-    let onAddToSaved: (String, Int, Int, String?) async -> Bool
+    let vkApi: VKApiService?
     let getAccessToken: () -> String
 
     var body: some View {
@@ -70,7 +70,7 @@ struct FeedPostRowCell: View {
             pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhoto,
             onMakeProfilePhoto: onMakeProfilePhoto,
-            onAddToSaved: onAddToSaved,
+            vkApi: vkApi,
             getAccessToken: getAccessToken
         )
         .padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))

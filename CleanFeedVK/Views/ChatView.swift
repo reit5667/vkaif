@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 /// Экран чата: история (getHistory), ввод и отправка (send), пагинация вверх.
 struct ChatView: View {
@@ -17,6 +20,7 @@ struct ChatView: View {
     @State private var sendError: String?
     @State private var isLoadingMore = false
     @State private var lastMessageId: Int?
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
 
     private let vkApi = VKApiService()
     private let pageSize = 30
@@ -141,10 +145,22 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Image(systemName: "photo.circle.fill")
+                    .font(.title2)
+            }
+            .disabled(sending)
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                guard let item = newItem else { return }
+                Task { await sendPhoto(from: item) }
+            }
             TextField("Сообщение", text: $inputText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
-                // На симуляторе: I/O → Keyboard → Connect Hardware Keyboard (выкл.), чтобы показать экранную клавиатуру.
             Button {
                 sendMessage()
             } label: {
@@ -244,5 +260,47 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private func sendPhoto(from item: PhotosPickerItem) async {
+        guard let token = authService.accessToken else {
+            await MainActor.run { sendError = "Нет доступа" }
+            return
+        }
+        await MainActor.run { sending = true; sendError = nil }
+        defer { Task { @MainActor in sending = false; selectedPhotoItem = nil } }
+        do {
+            guard let imageData = try await item.loadTransferable(type: ChatImageDataTransfer.self) else {
+                await MainActor.run { sendError = "Не удалось загрузить фото" }
+                return
+            }
+            let jpegData = imageData.dataAsJpeg
+            let uploadUrl = try await vkApi.getMessagesUploadServer(token: token, peerId: peerId)
+            let (server, hash, photo) = try await vkApi.uploadOwnerPhotoToServer(uploadUrl: uploadUrl, imageData: jpegData)
+            let saved = try await vkApi.saveMessagesPhoto(token: token, server: server, hash: hash, photo: photo)
+            let attachment = "photo\(saved.ownerId)_\(saved.id)"
+            let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: Int.random(in: 1...Int.max), attachment: attachment)
+            let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+            let newMsg = VKMessage(id: messageId, fromId: fromId, peerId: peerId, date: Date(), text: text.isEmpty ? "[Фото]" : text, out: 1, readState: nil)
+            await MainActor.run {
+                inputText = ""
+                messages.append(newMsg)
+                totalCount += 1
+            }
+        } catch {
+            await MainActor.run { sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+        }
+    }
+}
+
+private struct ChatImageDataTransfer: Transferable {
+    let data: Data
+    var dataAsJpeg: Data {
+        guard let ui = UIImage(data: data) else { return data }
+        return ui.jpegData(compressionQuality: 0.9) ?? data
+    }
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(importedContentType: .image) { data in ChatImageDataTransfer(data: data) }
     }
 }

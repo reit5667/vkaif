@@ -76,6 +76,8 @@ struct PostCellView: View {
     @Environment(\.makeProfilePhotoForGallery) private var makeProfilePhotoFromEnvironment
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
+    /// Токен, захваченный при открытии галереи (в fullScreenCover getAccessToken часто пуст — сохраняем при тапе).
+    @State private var tokenForGallery: String = ""
     private let textLineLimitCollapsed = 3
 
     /// URL фото для превью: приоритет feedPreviewURL (меньше трафика), fallback на displayURL для надёжности.
@@ -102,9 +104,9 @@ struct PostCellView: View {
         }
     }
 
-    /// Тап «Добавить в сохранённые» в fullscreen галерее фото поста. nil = пункт неактивен. (token, ownerId, photoId, accessKey).
-    var onAddToSaved: ((String, Int, Int, String?) async -> Bool)? = nil
-    /// Опционально: возврат токена для сохранения (надёжнее в fullScreenCover).
+    /// VK API для «Добавить в сохранённые» в fullscreen галерее — галерея сама вызывает photosCopy.
+    var vkApi: VKApiService? = nil
+    /// Опционально: возврат токена для «Удалить» / «Сделать фото профиля».
     var getAccessToken: (() -> String)? = nil
 
     /// Видео из вложений поста с ownerId для плеера/video.get.
@@ -189,9 +191,7 @@ struct PostCellView: View {
         let postContext: PostCommentsContext? = (onTapComments != nil && authService != nil)
             ? PostCommentsContext(ownerId: ownerId, postId: post.id, totalCount: post.commentsCount)
             : nil
-        let addToSaved: ((String, Int, Int, String?) async -> Bool)? = canDeletePost
-            ? nil as ((String, Int, Int, String?) async -> Bool)?
-            : onAddToSaved
+        let apiForSaved: VKApiService? = canDeletePost ? nil : vkApi
         let deletePhoto: ((String, Int, Int) async -> Bool)? = canDeletePost
             ? onDeletePhoto
             : nil as ((String, Int, Int) async -> Bool)?
@@ -209,9 +209,9 @@ struct PostCellView: View {
             postCommentsContext: postContext,
             authService: authService,
             photoIdsForSaving: photoIds,
-            onAddToSaved: addToSaved,
+            vkApi: apiForSaved,
             getAccessToken: getAccessToken,
-            initialAccessToken: getAccessToken?() ?? "",
+            initialAccessToken: tokenForGallery.isEmpty ? (getAccessToken?() ?? "") : tokenForGallery,
             isOwnPhotos: canDeletePost,
             onDeletePhoto: deletePhoto,
             isProfileAlbum: canDeletePost,
@@ -376,7 +376,10 @@ struct PostCellView: View {
         .frame(height: singlePhoto ? singlePhotoMaxHeight : 120)
         .clipped()
         .cornerRadius(8)
-        .onTapGesture { fullScreenPhotoIndex = index }
+        .onTapGesture {
+            tokenForGallery = getAccessToken?() ?? authService?.accessToken ?? ""
+            fullScreenPhotoIndex = index
+        }
     }
 
     /// Строка видео: превью или плейсхолдер, тап → onTapVideo (плеер). Сетка по центру.
