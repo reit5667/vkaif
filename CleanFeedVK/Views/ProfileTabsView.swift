@@ -494,6 +494,16 @@ struct ProfileGroupsTabView: View {
     let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
     var onRefresh: () async -> Void
+    /// Вызывается после успешной отписки в GroupWallView — обновить список групп.
+    var onLeaveSuccess: (() -> Void)? = nil
+
+    @State private var searchText = ""
+
+    private var filteredGroups: [VKGroup] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return groups }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return groups.filter { (($0.name ?? "").lowercased().contains(query)) }
+    }
 
     var body: some View {
         Group {
@@ -505,18 +515,32 @@ struct ProfileGroupsTabView: View {
                 if groups.isEmpty {
                     ContentUnavailableView("Нет групп", systemImage: "person.3")
                 } else {
-                    List(groups, id: \.id) { group in
-                        NavigationLink(value: GroupDestination(groupId: group.id)) {
-                            HStack(spacing: 12) {
-                                groupAvatar(group)
-                                Text(group.name ?? "Группа \(group.id)")
-                                    .font(.body)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                            TextField("Поиск по названию", text: $searchText)
+                                .textFieldStyle(.plain)
+                        }
+                        .padding(10)
+                        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+
+                        List(filteredGroups, id: \.id) { group in
+                            NavigationLink(value: GroupDestination(groupId: group.id)) {
+                                HStack(spacing: 12) {
+                                    groupAvatar(group)
+                                    Text(group.name ?? "Группа \(group.id)")
+                                        .font(.body)
+                                }
                             }
                         }
+                        .listStyle(.insetGrouped)
                     }
-                    .listStyle(.insetGrouped)
                     .navigationDestination(for: GroupDestination.self) { dest in
-                        GroupWallView(authService: authService, groupId: dest.groupId)
+                        GroupWallView(authService: authService, groupId: dest.groupId, onLeaveSuccess: onLeaveSuccess)
                     }
                 }
             case .failed(let error):

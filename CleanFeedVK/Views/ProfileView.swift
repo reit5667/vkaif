@@ -151,7 +151,8 @@ struct ProfileView: View {
                 groups: viewModel.groups,
                 loadState: viewModel.groupsLoadState,
                 authService: authService,
-                onRefresh: { await viewModel.loadGroups(forceRefresh: true) }
+                onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
+                onLeaveSuccess: { Task { await viewModel.loadGroups(forceRefresh: true) } }
             )
         }
     }

@@ -394,6 +394,8 @@ struct VKPhotoComments: Decodable {
 
 struct VKPhoto: Decodable {
     let id: Int
+    /// Владелец фото (owner_id в ответе photos.get). Для альбома «Сохранённые» у каждого фото свой owner_id после copy.
+    let ownerId: Int?
     let sizes: [VKPhotoSize]?
     let likes: VKPhotoLikes?
     let comments: VKPhotoComments?
@@ -409,6 +411,7 @@ struct VKPhoto: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case ownerId = "owner_id"
         case sizes
         case likes
         case comments
@@ -424,6 +427,7 @@ struct VKPhoto: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
+        ownerId = try c.decodeIfPresent(Int.self, forKey: .ownerId)
         sizes = try c.decodeIfPresent([VKPhotoSize].self, forKey: .sizes)
         likes = try c.decodeIfPresent(VKPhotoLikes.self, forKey: .likes)
         comments = try c.decodeIfPresent(VKPhotoComments.self, forKey: .comments)
@@ -462,9 +466,9 @@ struct VKPhoto: Decodable {
             ?? photo130 ?? photo75 ?? photo604 ?? photo807 ?? photo1280 ?? photo2560
     }
 
-    /// URL для превью в ленте: приоритет средних размеров (m,x,y,z,w); иначе legacy.
+    /// URL для превью в ленте: приоритет крупных размеров (x 604px, w/z/y) для лучшего качества миниатюр; иначе legacy.
     var feedPreviewURL: String? {
-        urlFromSizes(order: ["m", "x", "y", "z", "w", "r", "q", "p", "s", "o"])
+        urlFromSizes(order: ["x", "w", "z", "y", "m", "r", "q", "p", "s", "o"])
             ?? photo604 ?? photo807 ?? photo130 ?? photo75 ?? photo1280 ?? photo2560
     }
 }
@@ -712,10 +716,26 @@ struct OwnerPhotoUploadServerResponse: Decodable {
 }
 
 /// Ответ POST на upload_url (фото профиля). Потом передать в photos.saveOwnerPhoto.
+/// VK может вернуть server числом (Int) или строкой — принимаем оба варианта.
 struct OwnerPhotoUploadResult: Decodable {
     let server: String?
     let photo: String?
     let hash: String?
+
+    enum CodingKeys: String, CodingKey { case server, photo, hash }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let s = try c.decodeIfPresent(String.self, forKey: .server) {
+            server = s
+        } else if let n = try c.decodeIfPresent(Int.self, forKey: .server) {
+            server = String(n)
+        } else {
+            server = nil
+        }
+        photo = try c.decodeIfPresent(String.self, forKey: .photo)
+        hash = try c.decodeIfPresent(String.self, forKey: .hash)
+    }
 }
 
 // MARK: - friends.get

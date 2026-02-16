@@ -53,7 +53,7 @@ struct AlbumPhotosView: View {
         }
     }
 
-    /// Удаление фото из альбома (photos.delete). Для своих альбомов — убираем фото из списка и закрываем галерею при успехе.
+    /// Удаление фото из альбома (photos.delete). При успехе — убираем фото из списка и закрываем галерею (локальное обновление, без рефетча).
     private func deletePhotoFromAlbum(token: String, ownerId: Int, photoId: Int) async -> Bool {
         let t = token.isEmpty ? (authService.accessToken ?? "") : token
         guard !t.isEmpty else { return false }
@@ -61,6 +61,7 @@ struct AlbumPhotosView: View {
             try await vkApi.photosDelete(token: t, ownerId: ownerId, photoId: photoId)
             await MainActor.run {
                 photos.removeAll { $0.id == photoId }
+                if totalCount > 0 { totalCount -= 1 }
                 fullScreenPhotoItem = nil
             }
             return true
@@ -143,7 +144,9 @@ struct AlbumPhotosView: View {
         .fullScreenCover(item: $fullScreenPhotoItem) { item in
             fullScreenGalleryContent(item: item)
         }
-        .onAppear { loadPhotos(offset: 0, append: false) }
+        .onAppear {
+            if loadState == .idle { loadPhotos(offset: 0, append: false) }
+        }
     }
 
     @ViewBuilder
@@ -168,9 +171,10 @@ struct AlbumPhotosView: View {
         let getAccessToken: () -> String = { authService.accessToken ?? "" }
         var onDelete: ((String, Int, Int) async -> Bool)? = nil
         if isOwnProfile {
-            onDelete = { token, oid, pid in await deletePhotoFromAlbum(token: token, ownerId: oid, photoId: pid) }
+            // Всегда используем ownerId альбома при вызове API — owner_id из фото в ответе VK иногда приходит некорректно (вне Int32).
+            onDelete = { token, _, pid in await deletePhotoFromAlbum(token: token, ownerId: ownerId, photoId: pid) }
         }
-        let photoIds: [PhotoSaveId] = photos.map { PhotoSaveId(ownerId: ownerId, photoId: $0.id, accessKey: $0.accessKey) }
+        let photoIds: [PhotoSaveId] = photos.map { PhotoSaveId(ownerId: $0.ownerId ?? ownerId, photoId: $0.id, accessKey: $0.accessKey) }
         return FullScreenPhotoGalleryView(
             urls: urls,
             initialIndex: min(item.index, urls.count - 1),

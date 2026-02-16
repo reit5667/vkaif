@@ -174,7 +174,7 @@ struct PostCellView: View {
             }
         }
         .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(Color(.systemBackground))
     }
 
@@ -222,6 +222,12 @@ struct PostCellView: View {
 
     // MARK: - Header (тап → группа или профиль, если передан feedDestination)
 
+    /// Одна строка даты: календарная при наличии, иначе относительная (без дублирования).
+    private var displayDateString: String {
+        if let cal = calendarDate, !cal.isEmpty { return cal }
+        return relativeDate
+    }
+
     private var headerContent: some View {
         HStack(alignment: .top, spacing: 10) {
             avatarView
@@ -229,14 +235,9 @@ struct PostCellView: View {
                 Text(authorName)
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                Text(relativeDate)
+                Text(displayDateString)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                if let cal = calendarDate, !cal.isEmpty {
-                    Text(cal)
-                        .font(.caption2)
-                        .foregroundColor(.secondary.opacity(0.9))
-                }
             }
             Spacer(minLength: 0)
             if (canDeletePost && onDelete != nil) || (canPinPost && (onPin != nil || onUnpin != nil)) {

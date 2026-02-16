@@ -369,6 +369,26 @@ final class VKApiService: Sendable {
         return groups.first
     }
 
+    // MARK: - groups.leave
+
+    /// Отписаться от группы (выйти из сообщества). group_id — положительный ID группы. Возвращает 1 при успехе.
+    func leaveGroup(token: String, groupId: Int) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        guard groupId > 0 else { throw VKApiError.apiError(code: -1, message: "Некорректный ID группы") }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "group_id", value: String(groupId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/groups.leave") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "groups.leave ok groupId=\(groupId)")
+    }
+
     // MARK: - wall.get
 
     /// Стена: посты группы (ownerId < 0) или пользователя (ownerId > 0). extended=1 — profiles и groups для имён/аватаров репостов.

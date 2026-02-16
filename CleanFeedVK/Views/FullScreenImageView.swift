@@ -2,12 +2,19 @@ import SwiftUI
 import Photos
 import UIKit
 
-/// Один URL — на весь экран. Если onTap задан — тап переключает панель; иначе тап закрывает.
+/// Один URL — на весь экран. Zoom: двойной тап или pinch двумя пальцами. Если onTap задан — одиночный тап переключает панель; иначе тап закрывает.
 struct FullScreenImageView: View {
     let imageURL: URL?
     let onDismiss: () -> Void
     /// Если задан — по тапу вызывается onTap (галерея: показать панель); иначе тап = onDismiss.
     var onTap: (() -> Void)? = nil
+
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+
+    private let minScale: CGFloat = 1.0
+    private let maxScale: CGFloat = 4.0
+    private let doubleTapZoomScale: CGFloat = 2.5
 
     var body: some View {
         ZStack {
@@ -29,6 +36,28 @@ struct FullScreenImageView: View {
                             .tint(.white)
                     @unknown default:
                         EmptyView()
+                    }
+                }
+                .scaleEffect(scale)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            let newScale = lastScale * value
+                            scale = min(maxScale, max(minScale, newScale))
+                        }
+                        .onEnded { _ in
+                            lastScale = scale
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        if scale > 1 {
+                            scale = 1
+                            lastScale = 1
+                        } else {
+                            scale = doubleTapZoomScale
+                            lastScale = doubleTapZoomScale
+                        }
                     }
                 }
             } else {
@@ -200,8 +229,8 @@ struct FullScreenPhotoGalleryView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .indexViewStyle(.page(backgroundDisplayMode: .never))
-                .gesture(
-                    DragGesture()
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 30)
                         .onEnded { value in
                             let dy = value.translation.height
                             let dx = value.translation.width
@@ -508,12 +537,15 @@ struct FullScreenPhotoGalleryView: View {
             Button {
                 onDismiss()
             } label: {
-                Image(systemName: "chevron.down.circle.fill")
-                    .font(.title2)
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 36))
                     .foregroundStyle(.white)
                     .symbolRenderingMode(.hierarchical)
+                    .frame(minWidth: 56, minHeight: 56)
+                    .contentShape(Rectangle())
             }
-            .padding(.leading, 16)
+            .buttonStyle(.plain)
+            .padding(.leading, 12)
             .padding(.top, 8)
             Spacer(minLength: 0)
             if !isSavedAlbum || (isOwnPhotos && (onDeletePhoto != nil || onMakeProfilePhoto != nil)) {
@@ -523,16 +555,16 @@ struct FullScreenPhotoGalleryView: View {
                 }
                 showActionsOverlay = true
             } label: {
-                    Image(systemName: "ellipsis.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .symbolRenderingMode(.hierarchical)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 16)
-                .padding(.top, 8)
+                Image(systemName: "ellipsis.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white)
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(minWidth: 56, minHeight: 56)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
+            .padding(.top, 8)
             }
         }
         .padding(.top, 8)
@@ -624,27 +656,36 @@ struct FullScreenPhotoGalleryView: View {
 
 // MARK: - Сохранение изображения в «Фото»
 
-/// Сохраняет изображение по URL в альбом «Фото». Вызов на MainActor во избежание крашей с PHPhotoLibrary.
+/// Сохраняет изображение по URL в альбом «Фото». Используется запись во временный файл и creationRequestForAssetFromImage(atFileURL:) — без UIImage в фоновом потоке, чтобы избежать краша.
 /// В Target → Info нужен ключ NSPhotoLibraryAddUsageDescription (например: «Сохранение фото в галерею»).
-@MainActor
 private func saveImageToPhotoLibrary(url: URL) async -> Bool {
     let status = await withCheckedContinuation { (cont: CheckedContinuation<PHAuthorizationStatus, Never>) in
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            cont.resume(returning: status)
+            DispatchQueue.main.async {
+                cont.resume(returning: status)
+            }
         }
     }
     guard status == .authorized || status == .limited else { return false }
+    guard let (data, _) = try? await URLSession.shared.data(from: url),
+          !data.isEmpty,
+          UIImage(data: data) != nil else { return false }
+    let tempDir = FileManager.default.temporaryDirectory
+    let tempFile = tempDir.appendingPathComponent(UUID().uuidString + ".jpg", isDirectory: false)
     do {
-        let (data, _) = try await URLSession.shared.data(from: url)
-        guard let image = UIImage(data: data) else { return false }
-        return await withCheckedContinuation { cont in
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }) { success, _ in
-                cont.resume(returning: success)
-            }
-        }
+        try data.write(to: tempFile)
     } catch {
         return false
+    }
+    return await withCheckedContinuation { cont in
+        let fileURL = tempFile
+        PHPhotoLibrary.shared().performChanges({
+            _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+        }) { success, _ in
+            DispatchQueue.main.async {
+                cont.resume(returning: success)
+                try? FileManager.default.removeItem(at: fileURL)
+            }
+        }
     }
 }

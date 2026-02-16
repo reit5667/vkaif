@@ -7,9 +7,12 @@ struct MessagesTabView: View {
     @State private var items: [VKConversationItem] = []
     @State private var profiles: [VKProfile] = []
     @State private var groups: [VKGroup] = []
+    @State private var totalCount: Int = 0
+    @State private var isLoadingMore: Bool = false
     @State private var loadState: LoadState = .idle
 
     private let vkApi = VKApiService()
+    private let pageSize = 50
 
     enum LoadState {
         case idle
@@ -73,6 +76,12 @@ struct MessagesTabView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                }
+                if items.count < totalCount {
+                    ProgressView("Подгрузка диалогов…")
+                        .frame(maxWidth: .infinity)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
+                        .onAppear { loadMoreConversations() }
                 }
             }
             .listStyle(.insetGrouped)
@@ -144,11 +153,16 @@ struct MessagesTabView: View {
         }
         if !force, case .loading = loadState { return }
         loadState = .loading
+        if force {
+            items = []
+            totalCount = 0
+        }
         Task {
             do {
-                let res = try await vkApi.getConversations(token: token, count: 50, offset: 0)
+                let res = try await vkApi.getConversations(token: token, count: pageSize, offset: 0)
                 await MainActor.run {
                     items = res.items
+                    totalCount = res.count
                     profiles = res.profiles ?? []
                     groups = res.groups ?? []
                     loadState = .loaded
@@ -156,6 +170,40 @@ struct MessagesTabView: View {
             } catch {
                 await MainActor.run { loadState = .failed(error) }
             }
+        }
+    }
+
+    private func loadMoreConversations() {
+        guard let token = authService.accessToken else { return }
+        guard case .loaded = loadState, items.count < totalCount, !isLoadingMore else { return }
+        isLoadingMore = true
+        let offset = items.count
+        Task {
+            do {
+                let res = try await vkApi.getConversations(token: token, count: pageSize, offset: offset)
+                await MainActor.run {
+                    items.append(contentsOf: res.items)
+                    mergeProfiles(res.profiles ?? [])
+                    mergeGroups(res.groups ?? [])
+                    isLoadingMore = false
+                }
+            } catch {
+                await MainActor.run { isLoadingMore = false }
+            }
+        }
+    }
+
+    private func mergeProfiles(_ new: [VKProfile]) {
+        var ids = Set(profiles.map(\.id))
+        for p in new where ids.insert(p.id).inserted {
+            profiles.append(p)
+        }
+    }
+
+    private func mergeGroups(_ new: [VKGroup]) {
+        var ids = Set(groups.map(\.id))
+        for g in new where ids.insert(g.id).inserted {
+            groups.append(g)
         }
     }
 }

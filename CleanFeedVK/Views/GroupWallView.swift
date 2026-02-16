@@ -2,15 +2,20 @@ import SwiftUI
 
 /// Страница группы: инфо (groups.getById) + лента постов (wall.get).
 struct GroupWallView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var authService: AuthService
     /// ID группы (положительное число, например 12345).
     let groupId: Int
+    /// Вызывается после успешной отписки (до dismiss), чтобы родитель обновил список групп.
+    var onLeaveSuccess: (() -> Void)? = nil
 
     @State private var group: VKGroup?
     @State private var posts: [VKPost] = []
     @State private var profiles: [VKProfile] = []
     @State private var groups: [VKGroup] = []
     @State private var loadState: GroupWallLoadState = .idle
+    @State private var leaveInProgress = false
+    @State private var leaveError: String? = nil
     @State private var commentsContext: PostCommentsContext? = nil
     @State private var postLikeOverrides: [String: Int] = [:]
     @State private var postLikedOverrides: [String: Bool] = [:]
@@ -61,13 +66,27 @@ struct GroupWallView: View {
         .navigationTitle(group?.name ?? "Группа")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if case .loaded = loadState {
-                    Button("Обновить") { load() }
+            if case .loaded = loadState {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        Button(leaveInProgress ? "Отписка…" : "Отписаться") {
+                            leaveGroup()
+                        }
+                        .disabled(leaveInProgress)
+                        Button("Обновить") { load() }
+                    }
                 }
             }
         }
         .onAppear { load() }
+        .alert("Ошибка отписки", isPresented: Binding(
+            get: { leaveError != nil },
+            set: { if !$0 { leaveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { leaveError = nil }
+        } message: {
+            if let msg = leaveError { Text(msg) }
+        }
         .sheet(item: $commentsContext) { ctx in
             PostCommentsView(context: ctx, authService: authService)
         }
@@ -147,6 +166,7 @@ struct GroupWallView: View {
                 authorName: group?.name ?? "Группа",
                 authorAvatarURL: group?.photo50,
                 relativeDate: relativeDateString(from: post.date),
+                calendarDate: calendarDateString(from: post.date),
                 profiles: profiles,
                 groups: groups,
                 authService: nil,
@@ -295,6 +315,29 @@ struct GroupWallView: View {
         } catch {
             AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(o) photoId=\(p)", error: error)
             return false
+        }
+    }
+
+    private func leaveGroup() {
+        guard let token = authService.accessToken, !token.isEmpty else {
+            leaveError = "Нет доступа. Войдите снова."
+            return
+        }
+        leaveInProgress = true
+        Task {
+            do {
+                try await vkApi.leaveGroup(token: token, groupId: groupId)
+                await MainActor.run {
+                    leaveInProgress = false
+                    onLeaveSuccess?()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    leaveInProgress = false
+                    leaveError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                }
+            }
         }
     }
 }

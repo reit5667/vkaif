@@ -49,6 +49,8 @@ struct ContentView: View {
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         NavigationView {
             Group {
@@ -78,6 +80,11 @@ struct ContentView: View {
             .sheet(isPresented: $showAuthView) {
                 AuthView(authService: authService)
             }
+            .onChange(of: scenePhase) { _, new in
+                if new == .active, case .authenticated = authService.state {
+                    loadFeed()
+                }
+            }
         }
     }
 
@@ -90,6 +97,11 @@ struct ContentView: View {
             }
         }
         .navigationTitle("Главная")
+        .onAppear {
+            if case .authenticated = authService.state, case .idle = feedLoadState {
+                loadFeed()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Обновить") { loadFeed() }
