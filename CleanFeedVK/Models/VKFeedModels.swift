@@ -877,7 +877,7 @@ struct MessagesGetConversationsResponse: Decodable {
     }
 }
 
-/// Сообщение в истории (messages.getHistory).
+/// Сообщение в истории (messages.getHistory). Поля from_id/peer_id/date могут отсутствовать в action-сообщениях и др. — декодируем с дефолтами.
 struct VKMessage: Decodable {
     let id: Int
     let fromId: Int
@@ -900,9 +900,9 @@ struct VKMessage: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
-        fromId = try c.decode(Int.self, forKey: .fromId)
-        peerId = try c.decode(Int.self, forKey: .peerId)
-        let ts = try c.decode(Int.self, forKey: .date)
+        fromId = try c.decodeIfPresent(Int.self, forKey: .fromId) ?? 0
+        peerId = try c.decodeIfPresent(Int.self, forKey: .peerId) ?? 0
+        let ts = try c.decodeIfPresent(Int.self, forKey: .date) ?? 0
         date = Date(timeIntervalSince1970: TimeInterval(ts))
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         out = try c.decodeIfPresent(Int.self, forKey: .out)
@@ -921,7 +921,7 @@ struct VKMessage: Decodable {
     }
 }
 
-/// Ответ messages.getHistory (extended=1).
+/// Ответ messages.getHistory (extended=1). Элементы items, не прошедшие декод (вложения/репосты и т.д.), пропускаются.
 struct MessagesGetHistoryResponse: Decodable {
     let count: Int
     let items: [VKMessage]
@@ -933,6 +933,23 @@ struct MessagesGetHistoryResponse: Decodable {
         case items
         case profiles
         case groups
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try c.decode(Int.self, forKey: .count)
+        let rawItems = try c.decode([FailableDecode<VKMessage>].self, forKey: .items)
+        items = rawItems.compactMap(\.value)
+        profiles = try c.decodeIfPresent([VKProfile].self, forKey: .profiles)
+        groups = try c.decodeIfPresent([VKGroup].self, forKey: .groups)
+    }
+}
+
+/// Обёртка для элемента массива: при ошибке декода возвращает nil, не ломая весь массив.
+private struct FailableDecode<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        value = try? T(from: decoder)
     }
 }
 

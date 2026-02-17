@@ -21,15 +21,26 @@ struct ChatView: View {
     @State private var isLoadingMore = false
     @State private var lastMessageId: Int?
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var replyToMessage: VKMessage? = nil
+    @State private var deleteInProgress: Set<Int> = []
+    @State private var showMaterialsStub = false
 
     private let vkApi = VKApiService()
     private let pageSize = 30
 
-    enum LoadState {
+    enum LoadState: Equatable {
         case idle
         case loading
         case loaded
         case failed(Error)
+
+        static func == (lhs: LoadState, rhs: LoadState) -> Bool {
+            switch (lhs, rhs) {
+            case (.idle, .idle), (.loading, .loading), (.loaded, .loaded): return true
+            case (.failed, .failed): return true
+            default: return false
+            }
+        }
     }
 
     /// Заголовок: переданный title или из profiles/groups после загрузки.
@@ -53,12 +64,29 @@ struct ChatView: View {
                     .padding(.horizontal)
             }
             messagesList
+            if let reply = replyToMessage {
+                replyBanner(reply)
+            }
             inputBar
         }
         .navigationTitle(chatTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showMaterialsStub = true
+                } label: {
+                    Image(systemName: "photo.on.rectangle.angled")
+                }
+            }
+        }
         .onAppear { loadHistory() }
         .refreshable { loadHistory(force: true) }
+        .alert("Материалы диалога", isPresented: $showMaterialsStub) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Фотографии, видео, аудио и поиск по сообщениям — в разработке.")
+        }
     }
 
     private var messagesList: some View {
@@ -100,6 +128,13 @@ struct ChatView: View {
                             lastMessageId = messages.last?.id
                             scrollToBottom(proxy: proxy)
                         }
+                        .onChange(of: loadState) { _, newState in
+                            if case .loaded = newState {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                    scrollToBottom(proxy: proxy)
+                                }
+                            }
+                        }
                     }
                 }
             case .failed(let error):
@@ -116,6 +151,7 @@ struct ChatView: View {
 
     private func messageRow(_ msg: VKMessage) -> some View {
         let isOut = (msg.out ?? 0) == 1
+        let deleting = deleteInProgress.contains(msg.id)
         return HStack {
             if isOut { Spacer(minLength: 48) }
             VStack(alignment: isOut ? .trailing : .leading, spacing: 2) {
@@ -124,6 +160,7 @@ struct ChatView: View {
                     .padding(.vertical, 8)
                     .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .opacity(deleting ? 0.5 : 1.0)
                 Text(shortTime(msg.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -132,6 +169,23 @@ struct ChatView: View {
         }
         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
         .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if isOut {
+                Button(role: .destructive) {
+                    deleteMessage(msg)
+                } label: {
+                    Label("Удалить", systemImage: "trash")
+                }
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button {
+                replyToMessage = msg
+            } label: {
+                Label("Ответить", systemImage: "arrowshape.turn.up.left")
+            }
+            .tint(.blue)
+        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -139,6 +193,48 @@ struct ChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             withAnimation(.easeOut(duration: 0.2)) {
                 proxy.scrollTo(last.id, anchor: .bottom)
+            }
+        }
+    }
+
+    private func replyBanner(_ msg: VKMessage) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Ответ на:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(msg.text.isEmpty ? "[Фото]" : msg.text)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                replyToMessage = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color(.systemGray5))
+    }
+
+    private func deleteMessage(_ msg: VKMessage) {
+        guard let token = authService.accessToken else { return }
+        deleteInProgress.insert(msg.id)
+        Task {
+            do {
+                try await vkApi.deleteMessages(token: token, messageIds: [msg.id], deleteForAll: false)
+                await MainActor.run {
+                    messages.removeAll { $0.id == msg.id }
+                    totalCount = max(0, totalCount - 1)
+                    deleteInProgress.remove(msg.id)
+                }
+            } catch {
+                await MainActor.run {
+                    deleteInProgress.remove(msg.id)
+                    sendError = "Ошибка удаления: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -220,6 +316,9 @@ struct ChatView: View {
                 await MainActor.run {
                     let older = res.items.reversed()
                     messages = older + messages
+                    if res.items.isEmpty {
+                        totalCount = messages.count
+                    }
                     isLoadingMore = false
                 }
             } catch {
@@ -234,9 +333,10 @@ struct ChatView: View {
         sending = true
         sendError = nil
         let randomId = Int.random(in: 1...Int.max)
+        let replyId = replyToMessage?.id
         Task {
             do {
-                let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: randomId)
+                let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: randomId, replyTo: replyId)
                 let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
                 let newMsg = VKMessage(
                     id: messageId,
@@ -249,6 +349,7 @@ struct ChatView: View {
                 )
                 await MainActor.run {
                     inputText = ""
+                    replyToMessage = nil
                     sending = false
                     messages.append(newMsg)
                     totalCount += 1
@@ -297,10 +398,19 @@ struct ChatView: View {
 private struct ChatImageDataTransfer: Transferable {
     let data: Data
     var dataAsJpeg: Data {
-        guard let ui = UIImage(data: data) else { return data }
-        return ui.jpegData(compressionQuality: 0.9) ?? data
+        if let ui = UIImage(data: data), let jpeg = ui.jpegData(compressionQuality: 0.9) { return jpeg }
+        if let ui = decodeImageFromData(data), let jpeg = ui.jpegData(compressionQuality: 0.9) { return jpeg }
+        return data
     }
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(importedContentType: .image) { data in ChatImageDataTransfer(data: data) }
     }
+}
+
+/// Декодирование HEIC и других форматов, когда UIImage(data:) возвращает nil.
+private func decodeImageFromData(_ data: Data) -> UIImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+    guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else { return nil }
+    return UIImage(cgImage: cgImage)
 }

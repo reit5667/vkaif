@@ -134,6 +134,7 @@ struct ContentView: View {
             LazyVStack(spacing: 0) {
                 ForEach(feedPosts, id: \.postId) { post in
                     feedPostRow(post)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     Divider()
                 }
 

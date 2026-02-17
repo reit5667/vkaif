@@ -14,6 +14,8 @@ struct ProfileWallTabView: View {
     /// После успешного wall.delete — убрать пост из списка. nil = не показывать удаление.
     var onDeletePost: ((VKPost) -> Void)? = nil
     var onRefresh: () async -> Void
+    /// true = контент встроен во внешний ScrollView (header + посты скроллятся вместе).
+    var embeddedInScroll: Bool = false
 
     @State private var commentsContext: PostCommentsContext? = nil
     @State private var deleteInProgress: Set<String> = []
@@ -41,21 +43,24 @@ struct ProfileWallTabView: View {
                 if posts.isEmpty {
                     ContentUnavailableView("Нет записей", systemImage: "doc.text")
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(posts, id: \.postId) { post in
-                                VStack(spacing: 0) {
-                                    profileWallPostRow(post)
-                                    Divider()
-                                }
-                                .padding(.top, 12)
-                                .padding(.bottom, 12)
-                                .frame(maxWidth: .infinity)
-                                .background(Color(.systemBackground))
-                                .clipped()
+                    let wallContent = LazyVStack(spacing: 12) {
+                        ForEach(posts, id: \.postId) { post in
+                            VStack(spacing: 0) {
+                                profileWallPostRow(post)
+                                Divider()
                             }
+                            .padding(.top, 12)
+                            .padding(.bottom, 12)
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemBackground))
+                            .clipped()
                         }
-                        .padding(.horizontal)
+                    }
+                    .padding(.horizontal)
+                    if embeddedInScroll {
+                        wallContent
+                    } else {
+                        ScrollView { wallContent }
                     }
                 }
             case .failed(let error):
@@ -430,6 +435,26 @@ struct ProfileFriendsTabView: View {
     let loadState: ProfileTabLoadState
     @ObservedObject var authService: AuthService
     var onRefresh: () async -> Void
+    /// true = контент встроен во внешний ScrollView (профиль), скролл один на весь экран.
+    var embeddedInScroll: Bool = false
+
+    @State private var searchText = ""
+
+    private var filteredFriends: [VKFriend] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return friends }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return friends.filter { $0.displayName.lowercased().contains(query) }
+    }
+
+    private var searchRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск по имени", text: $searchText)
+                .textFieldStyle(.plain)
+        }
+        .padding(8)
+    }
 
     var body: some View {
         Group {
@@ -440,17 +465,55 @@ struct ProfileFriendsTabView: View {
             case .loaded:
                 if friends.isEmpty {
                     ContentUnavailableView("Нет друзей", systemImage: "person.2")
+                } else if embeddedInScroll {
+                    VStack(alignment: .leading, spacing: 0) {
+                        searchRow
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.systemGray6))
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredFriends, id: \.id) { friend in
+                                NavigationLink(value: friend.id) {
+                                    HStack(spacing: 12) {
+                                        friendAvatar(friend)
+                                        Text(friend.displayName)
+                                            .font(.body)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                }
+                                Divider()
+                                    .padding(.leading, 44 + 12)
+                            }
+                        }
+                        .background(Color(.systemBackground))
+                    }
+                    .navigationDestination(for: Int.self) { friendId in
+                        ProfileViewWrapper(authService: authService, userId: friendId)
+                    }
                 } else {
-                    List(friends, id: \.id) { friend in
-                        NavigationLink(value: friend.id) {
-                            HStack(spacing: 12) {
-                                friendAvatar(friend)
-                                Text(friend.displayName)
-                                    .font(.body)
+                    List {
+                        Section {
+                            searchRow
+                                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                                .listRowBackground(Color(.systemGray6))
+                        }
+                        Section {
+                            ForEach(filteredFriends, id: \.id) { friend in
+                                NavigationLink(value: friend.id) {
+                                    HStack(spacing: 12) {
+                                        friendAvatar(friend)
+                                        Text(friend.displayName)
+                                            .font(.body)
+                                    }
+                                }
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .navigationDestination(for: Int.self) { friendId in
+                        ProfileViewWrapper(authService: authService, userId: friendId)
+                    }
                 }
             case .failed(let error):
                 ContentUnavailableView(
@@ -461,9 +524,6 @@ struct ProfileFriendsTabView: View {
             }
         }
         .refreshable { await onRefresh() }
-        .navigationDestination(for: Int.self) { friendId in
-            ProfileViewWrapper(authService: authService, userId: friendId)
-        }
     }
 
     private func friendAvatar(_ friend: VKFriend) -> some View {
@@ -496,6 +556,8 @@ struct ProfileGroupsTabView: View {
     var onRefresh: () async -> Void
     /// Вызывается после успешной отписки в GroupWallView — обновить список групп.
     var onLeaveSuccess: (() -> Void)? = nil
+    /// true = контент встроен во внешний ScrollView (профиль), скролл один на весь экран.
+    var embeddedInScroll: Bool = false
 
     @State private var searchText = ""
 
@@ -503,6 +565,16 @@ struct ProfileGroupsTabView: View {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return groups }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return groups.filter { (($0.name ?? "").lowercased().contains(query)) }
+    }
+
+    private var searchRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск по названию", text: $searchText)
+                .textFieldStyle(.plain)
+        }
+        .padding(8)
     }
 
     var body: some View {
@@ -514,31 +586,53 @@ struct ProfileGroupsTabView: View {
             case .loaded:
                 if groups.isEmpty {
                     ContentUnavailableView("Нет групп", systemImage: "person.3")
-                } else {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                            TextField("Поиск по названию", text: $searchText)
-                                .textFieldStyle(.plain)
+                } else if embeddedInScroll {
+                    VStack(alignment: .leading, spacing: 0) {
+                        searchRow
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.systemGray6))
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredGroups, id: \.id) { group in
+                                NavigationLink(value: GroupDestination(groupId: group.id)) {
+                                    HStack(spacing: 12) {
+                                        groupAvatar(group)
+                                        Text(group.name ?? "Группа \(group.id)")
+                                            .font(.body)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                }
+                                Divider()
+                                    .padding(.leading, 44 + 12)
+                            }
                         }
-                        .padding(10)
-                        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 10))
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-
-                        List(filteredGroups, id: \.id) { group in
-                            NavigationLink(value: GroupDestination(groupId: group.id)) {
-                                HStack(spacing: 12) {
-                                    groupAvatar(group)
-                                    Text(group.name ?? "Группа \(group.id)")
-                                        .font(.body)
+                        .background(Color(.systemBackground))
+                    }
+                    .navigationDestination(for: GroupDestination.self) { dest in
+                        GroupWallView(authService: authService, groupId: dest.groupId, onLeaveSuccess: onLeaveSuccess)
+                    }
+                } else {
+                    List {
+                        Section {
+                            searchRow
+                                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                                .listRowBackground(Color(.systemGray6))
+                        }
+                        Section {
+                            ForEach(filteredGroups, id: \.id) { group in
+                                NavigationLink(value: GroupDestination(groupId: group.id)) {
+                                    HStack(spacing: 12) {
+                                        groupAvatar(group)
+                                        Text(group.name ?? "Группа \(group.id)")
+                                            .font(.body)
+                                    }
                                 }
                             }
                         }
-                        .listStyle(.insetGrouped)
                     }
+                    .listStyle(.insetGrouped)
+                    .frame(maxHeight: .infinity)
                     .navigationDestination(for: GroupDestination.self) { dest in
                         GroupWallView(authService: authService, groupId: dest.groupId, onLeaveSuccess: onLeaveSuccess)
                     }

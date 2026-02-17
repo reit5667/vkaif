@@ -76,9 +76,9 @@ struct ProfileView: View {
     }
 
     /// Header + Picker сверху; контент вкладки (List) — отдельно с .frame(maxHeight: .infinity).
-    /// List внутри ScrollView в SwiftUI даёт нулевую/схлопнутую высоту — контент не отображался.
+    /// Для вкладки «Стена» — header и посты в одном ScrollView.
     private func profileContent(user: VKUserDetail) -> some View {
-        VStack(spacing: 20) {
+        let header = VStack(spacing: 20) {
             avatarSection(user: user)
             nameSection(user: user)
             if let status = user.status, !status.isEmpty {
@@ -90,11 +90,31 @@ struct ProfileView: View {
                 }
             }
             .pickerStyle(.segmented)
-            tabContent(user: user)
-                .id(tabContentId)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
+        .padding(.horizontal)
+
+        /// Стена, Группы, Друзья — один ScrollView (header + контент скроллятся вместе). Фото — отдельная вкладка с альбомами.
+        return Group {
+            if selectedTab == .wall || selectedTab == .groups || selectedTab == .friends {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        header
+                        tabContent(user: user)
+                            .id(tabContentId)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding()
+                }
+            } else {
+                VStack(spacing: 20) {
+                    header
+                    tabContent(user: user)
+                        .id(tabContentId)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding()
+            }
+        }
         .onChange(of: selectedTab) { _, newTab in
             loadTabIfNeeded(tab: newTab, user: user)
         }
@@ -128,7 +148,8 @@ struct ProfileView: View {
                 authService: authService,
                 isOwnProfile: userId == nil,
                 onDeletePost: { viewModel.removeWallPost($0) },
-                onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) }
+                onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) },
+                embeddedInScroll: true
             )
         case .photo:
             ProfilePhotoTabView(
@@ -144,7 +165,8 @@ struct ProfileView: View {
                 friends: viewModel.friends,
                 loadState: viewModel.friendsLoadState,
                 authService: authService,
-                onRefresh: { await viewModel.loadFriends(forceRefresh: true) }
+                onRefresh: { await viewModel.loadFriends(forceRefresh: true) },
+                embeddedInScroll: true
             )
         case .groups:
             ProfileGroupsTabView(
@@ -152,7 +174,8 @@ struct ProfileView: View {
                 loadState: viewModel.groupsLoadState,
                 authService: authService,
                 onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
-                onLeaveSuccess: { Task { await viewModel.loadGroups(forceRefresh: true) } }
+                onLeaveSuccess: { Task { await viewModel.loadGroups(forceRefresh: true) } },
+                embeddedInScroll: true
             )
         }
     }
@@ -174,7 +197,7 @@ struct ProfileView: View {
     private func avatarSection(user: VKUserDetail) -> some View {
         VStack(spacing: 12) {
             Group {
-                if let urlString = user.avatarURL, let url = URL(string: urlString) {
+                if let urlString = user.fullScreenAvatarURL, let url = URL(string: urlString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):

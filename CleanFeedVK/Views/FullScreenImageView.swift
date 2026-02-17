@@ -11,6 +11,8 @@ struct FullScreenImageView: View {
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var zoomAnchor: UnitPoint = .center
+    @State private var viewSize: CGSize = .zero
 
     private let minScale: CGFloat = 1.0
     private let maxScale: CGFloat = 4.0
@@ -38,7 +40,14 @@ struct FullScreenImageView: View {
                         EmptyView()
                     }
                 }
-                .scaleEffect(scale)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { viewSize = geo.size }
+                            .onChange(of: geo.size) { _, new in viewSize = new }
+                    }
+                )
+                .scaleEffect(scale, anchor: zoomAnchor)
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
@@ -49,17 +58,28 @@ struct FullScreenImageView: View {
                             lastScale = scale
                         }
                 )
-                .onTapGesture(count: 2) {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        if scale > 1 {
-                            scale = 1
-                            lastScale = 1
-                        } else {
-                            scale = doubleTapZoomScale
-                            lastScale = doubleTapZoomScale
+                .gesture(
+                    SpatialTapGesture(count: 2)
+                        .onEnded { event in
+                            let loc = event.location
+                            let w = viewSize.width
+                            let h = viewSize.height
+                            if w > 0, h > 0 {
+                                let ux = min(1, max(0, loc.x / w))
+                                let uy = min(1, max(0, loc.y / h))
+                                zoomAnchor = UnitPoint(x: ux, y: uy)
+                            }
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                if scale > 1 {
+                                    scale = 1
+                                    lastScale = 1
+                                } else {
+                                    scale = doubleTapZoomScale
+                                    lastScale = doubleTapZoomScale
+                                }
+                            }
                         }
-                    }
-                }
+                )
             } else {
                 Image(systemName: "photo")
                     .resizable()
@@ -98,6 +118,7 @@ struct FullScreenPhotoGalleryView: View {
     /// Счётчики для отображения на панели (из поста); nil — не показывать число.
     var likesCount: Int? = nil
     var commentsCount: Int? = nil
+    var repostsCount: Int? = nil
     /// Лайк и комментарии: при вызове из поста — те же действия, что под постом.
     var isLiked: Bool = false
     var onLike: (() -> Void)? = nil
@@ -151,6 +172,10 @@ struct FullScreenPhotoGalleryView: View {
     @State private var saveToDeviceInProgress = false
     @State private var showSaveToDeviceToast = false
     @State private var saveToDeviceSuccess = true
+    @State private var shareFileURL: URL? = nil
+    @State private var showShareSheet = false
+    @State private var shareInProgress = false
+    @State private var showRepostStub = false
 
     init(
         urls: [URL],
@@ -158,6 +183,7 @@ struct FullScreenPhotoGalleryView: View {
         onDismiss: @escaping () -> Void,
         likesCount: Int? = nil,
         commentsCount: Int? = nil,
+        repostsCount: Int? = nil,
         isLiked: Bool = false,
         onLike: (() -> Void)? = nil,
         onTapComments: (() -> Void)? = nil,
@@ -179,6 +205,7 @@ struct FullScreenPhotoGalleryView: View {
         self.onDismiss = onDismiss
         self.likesCount = likesCount
         self.commentsCount = commentsCount
+        self.repostsCount = repostsCount
         self.isLiked = isLiked
         self.onLike = onLike
         self.onTapComments = onTapComments
@@ -388,6 +415,18 @@ struct FullScreenPhotoGalleryView: View {
                         .buttonStyle(.plain)
                         .disabled(saveToDeviceInProgress)
                         Divider()
+                        Button {
+                            showActionsOverlay = false
+                            shareCurrentPhoto()
+                        } label: {
+                            Label(shareInProgress ? "Загрузка…" : "Поделиться", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(shareInProgress)
+                        Divider()
                         Button("Закрыть") {
                             showActionsOverlay = false
                             onDismiss()
@@ -530,6 +569,19 @@ struct FullScreenPhotoGalleryView: View {
                 PhotoCommentsView(context: ctx, authService: auth)
             }
         }
+        .sheet(isPresented: $showShareSheet, onDismiss: {
+            if let u = shareFileURL { try? FileManager.default.removeItem(at: u) }
+            shareFileURL = nil
+        }) {
+            if let u = shareFileURL {
+                ShareSheet(activityItems: [u])
+            }
+        }
+        .alert("Репост", isPresented: $showRepostStub) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Репост записи из fullscreen — в разработке.")
+        }
     }
 
     private var topBar: some View {
@@ -570,70 +622,108 @@ struct FullScreenPhotoGalleryView: View {
         .padding(.top, 8)
     }
 
-    private var bottomBar: some View {
-        HStack(spacing: 32) {
-            if let action = onLike {
-                Button {
-                    likedOverride = !displayLiked
-                    action()
-                } label: {
-                    Label(
-                        "Нравится (\(displayLikesCount))",
-                        systemImage: displayLiked ? "heart.fill" : "heart"
-                    )
-                }
-                .font(.body)
-                .foregroundStyle(displayLiked ? .red : .white)
-                .buttonStyle(.plain)
-            } else {
-                Group {
-                    if let n = likesCount {
-                        Label("Нравится (\(n))", systemImage: "heart")
-                    } else {
-                        Label("Нравится", systemImage: "heart")
-                    }
-                }
-                .font(.body)
-                .foregroundStyle(.white)
-            }
+    /// Иконка и счётчик под ней (для лайков, комментов, репостов в нижней панели).
+    private func bottomBarIconWithCount(icon: String, count: Int) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+            Text("\(count)")
+                .font(.caption2)
+        }
+    }
 
-            if postCommentsContext != nil || photoCommentsContext != nil || onTapComments != nil {
-                Button {
-                    if let ctx = postCommentsContext, authService != nil {
-                        presentedPostComments = ctx
-                    } else if let ctx = photoCommentsContext, authService != nil {
-                        presentedPhotoComments = ctx
-                    } else {
-                        onTapComments?()
+    private var bottomBar: some View {
+        HStack(spacing: 0) {
+            // Лайки: иконка + цифра (всегда; тап — если есть onLike)
+            Group {
+                if let action = onLike {
+                    Button {
+                        likedOverride = !displayLiked
+                        action()
+                    } label: {
+                        bottomBarIconWithCount(icon: displayLiked ? "heart.fill" : "heart", count: displayLikesCount)
                     }
-                } label: {
-                    if let n = commentsCount {
-                        Label("Комментарии (\(n))", systemImage: "bubble.right")
-                    } else {
-                        Label("Комментарии", systemImage: "bubble.right")
-                    }
+                    .foregroundStyle(displayLiked ? .red : .white)
+                    .buttonStyle(.plain)
+                } else {
+                    bottomBarIconWithCount(icon: "heart", count: likesCount ?? 0)
+                    .foregroundStyle(.white)
                 }
-                .font(.body)
-                .foregroundStyle(.white)
-                .buttonStyle(.plain)
-            } else {
-                Group {
-                    if let n = commentsCount {
-                        Label("Комментарии (\(n))", systemImage: "bubble.right")
-                    } else {
-                        Label("Комментарии", systemImage: "bubble.right")
-                    }
-                }
-                .font(.body)
-                .foregroundStyle(.white)
             }
+            .font(.title2)
 
             Spacer(minLength: 0)
+
+            // Комментарии: иконка + цифра (всегда; тап — если есть контекст)
+            Group {
+                if postCommentsContext != nil || photoCommentsContext != nil || onTapComments != nil {
+                    Button {
+                        if let ctx = postCommentsContext, authService != nil {
+                            presentedPostComments = ctx
+                        } else if let ctx = photoCommentsContext, authService != nil {
+                            presentedPhotoComments = ctx
+                        } else {
+                            onTapComments?()
+                        }
+                    } label: {
+                        bottomBarIconWithCount(icon: "bubble.right", count: commentsCount ?? 0)
+                    }
+                    .foregroundStyle(.white)
+                    .buttonStyle(.plain)
+                } else {
+                    bottomBarIconWithCount(icon: "bubble.right", count: commentsCount ?? 0)
+                    .foregroundStyle(.white)
+                }
+            }
+            .font(.title2)
+
+            Spacer(minLength: 0)
+
+            // Репосты: кнопка (иконка + цифра); тап — заглушка «Скоро»
+            Button {
+                showRepostStub = true
+            } label: {
+                bottomBarIconWithCount(icon: "arrowshape.turn.up.right", count: repostsCount ?? 0)
+            }
+            .font(.title2)
+            .foregroundStyle(.white)
+            .buttonStyle(.plain)
+
+            if currentIndex >= 0, currentIndex < urls.count {
+                Spacer(minLength: 0)
+                Button {
+                    shareCurrentPhoto()
+                } label: {
+                    if shareInProgress {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                .font(.title2)
+                .foregroundStyle(.white)
+                .buttonStyle(.plain)
+                .disabled(shareInProgress)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .padding(.bottom, 24)
         .background(Color.black.opacity(0.5))
+    }
+
+    /// Поделиться фото в другие приложения (share sheet). Скачивает изображение во временный файл, затем показывает UIActivityViewController.
+    private func shareCurrentPhoto() {
+        guard currentIndex >= 0, currentIndex < urls.count else { return }
+        let url = urls[currentIndex]
+        shareInProgress = true
+        Task { @MainActor in
+            let fileURL = await prepareImageFileForSharing(url: url)
+            shareInProgress = false
+            if let fileURL {
+                shareFileURL = fileURL
+                showShareSheet = true
+            }
+        }
     }
 
     /// Скачать текущее фото по URL и сохранить в «Фото». Требуется NSPhotoLibraryAddUsageDescription в Info.
@@ -651,6 +741,33 @@ struct FullScreenPhotoGalleryView: View {
                 showSaveToDeviceToast = false
             }
         }
+    }
+}
+
+// MARK: - Share sheet (UIActivityViewController)
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+/// Скачивает изображение по URL и сохраняет во временный файл для share sheet. Вызывающий обязан удалить файл после использования.
+private func prepareImageFileForSharing(url: URL) async -> URL? {
+    guard let (data, _) = try? await URLSession.shared.data(from: url),
+          !data.isEmpty,
+          UIImage(data: data) != nil else { return nil }
+    let tempDir = FileManager.default.temporaryDirectory
+    let tempFile = tempDir.appendingPathComponent(UUID().uuidString + ".jpg", isDirectory: false)
+    do {
+        try data.write(to: tempFile)
+        return tempFile
+    } catch {
+        return nil
     }
 }
 

@@ -983,13 +983,14 @@ final class VKApiService: Sendable {
 
     // MARK: - messages.send
 
-    /// Отправить сообщение. random_id — уникальный для дедупликации. attachment — опционально, например "photo123_456".
+    /// Отправить сообщение. random_id — уникальный для дедупликации. attachment — опционально, например "photo123_456". reply_to — id сообщения для ответа.
     func sendMessage(
         token: String,
         peerId: Int,
         message: String,
         randomId: Int,
-        attachment: String? = nil
+        attachment: String? = nil,
+        replyTo: Int? = nil
     ) async throws -> Int {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -1002,6 +1003,9 @@ final class VKApiService: Sendable {
         if let att = attachment, !att.isEmpty {
             queryItems.append(URLQueryItem(name: "attachment", value: att))
         }
+        if let reply = replyTo {
+            queryItems.append(URLQueryItem(name: "reply_to", value: String(reply)))
+        }
         guard var components = URLComponents(string: "\(baseURL)/messages.send") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
         guard let url = components.url else { throw VKApiError.invalidURL }
@@ -1011,6 +1015,28 @@ final class VKApiService: Sendable {
         let response = try await requestVK(MessagesSendResponse.self, from: request)
         logger?.info("VKApi", "messages.send ok messageId=\(response.messageId)")
         return response.messageId
+    }
+
+    // MARK: - messages.delete
+
+    /// Удалить сообщение. messageIds — массив id сообщений. deleteForAll: 1 = удалить для всех (беседа).
+    func deleteMessages(token: String, messageIds: [Int], deleteForAll: Bool = false) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let idsString = messageIds.map(String.init).joined(separator: ",")
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "message_ids", value: idsString),
+            URLQueryItem(name: "delete_for_all", value: deleteForAll ? "1" : "0")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.delete") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "messages.delete messageIds=\(idsString)")
+        let _: [String: Int] = try await requestVK([String: Int].self, from: request)
+        logger?.info("VKApi", "messages.delete ok")
     }
 
     // MARK: - photos.getMessagesUploadServer / photos.saveMessagesPhoto (фото в личку)

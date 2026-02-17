@@ -1,4 +1,41 @@
 import SwiftUI
+import UIKit
+
+// MARK: - Justified text (SwiftUI не поддерживает .justified нативно)
+
+private struct JustifiedTextView: UIViewRepresentable {
+    let text: String
+    let font: UIFont
+    var lineLimit: Int? = nil
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.textAlignment = .justified
+        tv.font = font
+        tv.textColor = .label
+        tv.backgroundColor = .clear
+        tv.isScrollEnabled = false
+        tv.isEditable = false
+        tv.isSelectable = false
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.text = text
+        uiView.font = font
+        uiView.textContainer.maximumNumberOfLines = lineLimit ?? 0
+        uiView.textContainer.lineBreakMode = (lineLimit != nil) ? .byTruncatingTail : .byWordWrapping
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        let fittingSize = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: fittingSize.height)
+    }
+}
 
 // MARK: - Переопределение опроса после голосования (оптимистичное отображение)
 
@@ -10,6 +47,9 @@ struct PollVoteOverride {
 }
 
 // MARK: - Ячейка поста ленты
+
+/// Максимальная ширина поста: экран минус отступы (LazyVStack .padding .horizontal 16×2 + паддинг ячейки 16×2).
+private let postMaxWidth: CGFloat = (UIScreen.main.bounds.width - 64).rounded(.down)
 
 /// Заголовок: аватар, имя, относительная дата. Тело: текст с «Показать ещё». Медиа: сетка фото (1–10).
 struct PostCellView: View {
@@ -173,6 +213,8 @@ struct PostCellView: View {
                 likesCommentsRow
             }
         }
+        .frame(maxWidth: postMaxWidth, alignment: .leading)
+        .clipped()
         .padding()
         .frame(maxWidth: .infinity, alignment: .center)
         .background(Color(.systemBackground))
@@ -203,6 +245,7 @@ struct PostCellView: View {
             onDismiss: { fullScreenPhotoIndex = nil },
             likesCount: displayLikesCount,
             commentsCount: post.commentsCount,
+            repostsCount: post.repostsCount,
             isLiked: displayIsLiked,
             onLike: onLikeAction,
             onTapComments: onTapComments,
@@ -315,10 +358,11 @@ struct PostCellView: View {
 
     private var bodyText: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(post.text)
-                .font(.body)
-                .lineLimit(isTextExpanded ? nil : textLineLimitCollapsed)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            JustifiedTextView(
+                text: post.text,
+                font: .preferredFont(forTextStyle: .body),
+                lineLimit: isTextExpanded ? nil : textLineLimitCollapsed
+            )
 
             if post.text.count > 100 {
                 Button(isTextExpanded ? "Свернуть" : "Показать ещё") {
@@ -353,7 +397,7 @@ struct PostCellView: View {
     /// Максимальная высота превью одного фото в ленте (длинные картинки обрезаются, лайки/комменты всегда помещаются).
     private let singlePhotoMaxHeight: CGFloat = 360
 
-    /// Одна ячейка фото: контейнер с ограниченной высотой (миниатюра), чтобы длинные картинки не заезжали на следующий пост.
+    /// Одна ячейка фото: fill в фиксированный frame, clipped — без выхода за границы.
     private func photoThumbnailCell(url: URL, index: Int, singlePhoto: Bool) -> some View {
         AsyncImage(url: url) { phase in
             switch phase {
@@ -364,7 +408,7 @@ struct PostCellView: View {
             case .failure:
                 Image(systemName: "photo")
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .scaledToFit()
                     .foregroundColor(.secondary)
             case .empty:
                 ProgressView()
@@ -621,8 +665,7 @@ struct PostCellView: View {
                 Spacer(minLength: 0)
             }
             if !repost.text.isEmpty {
-                Text(repost.text)
-                    .font(.subheadline)
+                JustifiedTextView(text: repost.text, font: .preferredFont(forTextStyle: .subheadline))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !repostPhotoURLs.isEmpty {
