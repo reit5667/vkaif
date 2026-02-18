@@ -75,6 +75,24 @@
 - Фото в сообщениях: VKMessage.attachments ([VKAttachment]), thumbnail в пузырьке (messagePhotoGrid), тап → FullScreenPhotoGalleryView (сохранённые, закрытие).
 - Скролл чата: добавлен defaultScrollAnchor(.bottom); по отзыву пользователя при заходе всё ещё открывается посередине — задача 4.2b в статусе.
 
+## Fullscreen 2.1 (пан при зуме)
+
+- При увеличении изображения в fullscreen движения панят по картинке (просмотр деталей), а не листают изображения в посте. Реализовано: в FullScreenImageView при scale > 1 добавлены panOffset и DragGesture (с ограничением по области); опциональный onScaleChange для галереи; в FullScreenPhotoGalleryView при currentPageZoomScale > 1 листание TabView блокируется через highPriorityGesture(DragGesture).
+
+## Профиль 3.2 (полное фото в шапке)
+
+- Шапка профиля: главное фото из альбома «Фото профиля» (photos.get, album_id=-6) в полном размере, не миниатюра из users.get. VKApiService.getProfileMainPhoto, ProfileViewModel.profileMainPhoto, отображение в виде широкого блока с закруглёнными нижними углами (240pt). По тапу — FullScreenPhotoGalleryView (лайки, комментарии, меню), как при открытии фото из ленты.
+
+## Сообщения 4.2, 4.2b, 4.3
+
+- 4.2. Закрепление: для личных диалогов не реализуется (VK API messages.pin только для бесед); пункт в contextMenu показывается при peer_id ≥ 2e9.
+- 4.2b. Скролл к последнему сообщению при заходе в диалог: scrollToBottomOnEnter (два отложенных scrollTo) + defaultScrollAnchor(.bottom).
+- 4.3. Материалы диалога: вкладки Фото | Видео | Поиск. Пагинация по сообщениям: первая загрузка 200, подгрузка по 150. Поиск — messages.search. Кнопка в шапке чата открывает sheet DialogMaterialsView.
+
+## Остаётся (не в приоритете)
+
+- 4.4. Отображение репостов, стикеров и других сущностей в сообщениях.
+
 ---
 
 ## Ссылки на код (для справки)

@@ -12,10 +12,12 @@ final class ProfileViewModel: ObservableObject {
     /// nil = свой профиль, иначе ID друга.
     let userId: Int?
 
-    // MARK: - Header (users.get)
+    // MARK: - Header (users.get + главное фото из альбома -6)
 
     @Published private(set) var user: VKUserDetail?
     @Published private(set) var userLoadState: ProfileLoadState = .idle
+    /// Главное фото профиля из photos.get(album_id=-6) — полный размер; без него показываем fallback из users.get.
+    @Published private(set) var profileMainPhoto: VKPhoto?
 
     // MARK: - Вкладки (отдельные вызовы, не одним await)
 
@@ -52,7 +54,10 @@ final class ProfileViewModel: ObservableObject {
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] })
             let ownerIdForAlbums = user?.id ?? userId
-            if let oid = user?.id ?? userId { Task { await loadWall(ownerId: oid, forceRefresh: false) } }
+            if let oid = user?.id ?? userId {
+                Task { await loadProfileMainPhoto(ownerId: oid) }
+                Task { await loadWall(ownerId: oid, forceRefresh: false) }
+            }
             Task { await loadFriends(forceRefresh: false) }
             if userId == nil { Task { await loadGroups(forceRefresh: false) } }
             if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: false) } }
@@ -63,10 +68,14 @@ final class ProfileViewModel: ObservableObject {
     func refreshAll() {
         guard authService.accessToken != nil else { return }
         hasStartedInitialLoad = true
+        profileMainPhoto = nil
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] }, forceRefresh: true)
             let ownerIdForAlbums = user?.id ?? userId
-            if let oid = user?.id ?? userId { Task { await loadWall(ownerId: oid, forceRefresh: true) } }
+            if let oid = user?.id ?? userId {
+                Task { await loadProfileMainPhoto(ownerId: oid) }
+                Task { await loadWall(ownerId: oid, forceRefresh: true) }
+            }
             Task { await loadFriends(forceRefresh: true) }
             if userId == nil { Task { await loadGroups(forceRefresh: true) } }
             if let oid = ownerIdForAlbums { Task { await loadAlbums(ownerId: oid, forceRefresh: true) } }
@@ -90,6 +99,17 @@ final class ProfileViewModel: ObservableObject {
             }
         } catch {
             await MainActor.run { userLoadState = .failed(error) }
+        }
+    }
+
+    /// Главное фото профиля (photos.get, album_id=-6) — полный размер для шапки и fullscreen.
+    private func loadProfileMainPhoto(ownerId: Int) async {
+        guard let token = authService.accessToken else { return }
+        do {
+            let photo = try await vkApi.getProfileMainPhoto(token: token, ownerId: ownerId)
+            await MainActor.run { profileMainPhoto = photo }
+        } catch {
+            await MainActor.run { profileMainPhoto = nil }
         }
     }
 

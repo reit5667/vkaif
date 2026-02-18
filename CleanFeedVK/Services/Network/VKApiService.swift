@@ -230,6 +230,12 @@ final class VKApiService: Sendable {
         return wrapper.response
     }
 
+    /// Главное фото профиля (альбом «Фото профиля», album_id = -6). Первое фото в альбоме — в полном размере (sizes), не миниатюра из users.get.
+    func getProfileMainPhoto(token: String, ownerId: Int) async throws -> VKPhoto? {
+        let response = try await getPhotos(token: token, ownerId: ownerId, albumId: -6, count: 1, offset: 0, rev: 1)
+        return response.items.first
+    }
+
     // MARK: - friends.get
 
     /// Список друзей (userId = nil — текущий). extended=1 — полные объекты с полями.
@@ -978,6 +984,38 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "messages.getHistory peerId=\(peerId) offset=\(offset)")
         let response = try await requestVK(MessagesGetHistoryResponse.self, from: request)
         logger?.info("VKApi", "messages.getHistory ok count=\(response.count) items=\(response.items.count)")
+        return response
+    }
+
+    // MARK: - messages.search
+
+    /// Поиск по сообщениям в диалоге (peer_id). Ответ в формате как getHistory (count, items, profiles, groups).
+    func searchMessages(
+        token: String,
+        peerId: Int,
+        q: String,
+        count: Int = 20,
+        offset: Int = 0,
+        extended: Int = 1
+    ) async throws -> MessagesGetHistoryResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "q", value: q),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "extended", value: String(extended))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.search") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "messages.search peerId=\(peerId) q=\(q)")
+        let response = try await requestVK(MessagesGetHistoryResponse.self, from: request)
+        logger?.info("VKApi", "messages.search ok count=\(response.count) items=\(response.items.count)")
         return response
     }
 

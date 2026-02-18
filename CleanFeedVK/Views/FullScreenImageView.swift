@@ -2,17 +2,21 @@ import SwiftUI
 import Photos
 import UIKit
 
-/// Один URL — на весь экран. Zoom: двойной тап или pinch двумя пальцами. Если onTap задан — одиночный тап переключает панель; иначе тап закрывает.
+/// Один URL — на весь экран. Zoom: двойной тап или pinch. При scale > 1 — пан по картинке (движение по деталям), не листание. Если onTap задан — одиночный тап переключает панель; иначе тап закрывает.
 struct FullScreenImageView: View {
     let imageURL: URL?
     let onDismiss: () -> Void
     /// Если задан — по тапу вызывается onTap (галерея: показать панель); иначе тап = onDismiss.
     var onTap: (() -> Void)? = nil
+    /// При изменении scale вызывается (для галереи: при scale > 1 не листать страницы).
+    var onScaleChange: ((CGFloat) -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var zoomAnchor: UnitPoint = .center
     @State private var viewSize: CGSize = .zero
+    @State private var panOffset: CGSize = .zero
+    @State private var lastPanOffset: CGSize = .zero
 
     private let minScale: CGFloat = 1.0
     private let maxScale: CGFloat = 4.0
@@ -48,14 +52,17 @@ struct FullScreenImageView: View {
                     }
                 )
                 .scaleEffect(scale, anchor: zoomAnchor)
+                .offset(x: panOffset.width, y: panOffset.height)
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
                             let newScale = lastScale * value
                             scale = min(maxScale, max(minScale, newScale))
+                            onScaleChange?(scale)
                         }
                         .onEnded { _ in
                             lastScale = scale
+                            onScaleChange?(scale)
                         }
                 )
                 .gesture(
@@ -73,13 +80,45 @@ struct FullScreenImageView: View {
                                 if scale > 1 {
                                     scale = 1
                                     lastScale = 1
+                                    panOffset = .zero
+                                    lastPanOffset = .zero
+                                    onScaleChange?(1)
                                 } else {
                                     scale = doubleTapZoomScale
                                     lastScale = doubleTapZoomScale
+                                    onScaleChange?(doubleTapZoomScale)
                                 }
                             }
                         }
                 )
+                .gesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged { value in
+                            guard scale > 1 else { return }
+                            let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
+                            let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
+                            var next = CGSize(
+                                width: lastPanOffset.width + value.translation.width,
+                                height: lastPanOffset.height + value.translation.height
+                            )
+                            next.width = min(maxW, max(-maxW, next.width))
+                            next.height = min(maxH, max(-maxH, next.height))
+                            panOffset = next
+                        }
+                        .onEnded { _ in
+                            lastPanOffset = panOffset
+                        }
+                )
+                .onChange(of: scale) { _, newScale in
+                    if newScale <= 1 {
+                        panOffset = .zero
+                        lastPanOffset = .zero
+                    }
+                    onScaleChange?(newScale)
+                }
+                .onAppear {
+                    onScaleChange?(scale)
+                }
             } else {
                 Image(systemName: "photo")
                     .resizable()
@@ -176,6 +215,8 @@ struct FullScreenPhotoGalleryView: View {
     @State private var showShareSheet = false
     @State private var shareInProgress = false
     @State private var showRepostStub = false
+    /// Масштаб текущей страницы: при > 1 не листаем (пан по картинке).
+    @State private var currentPageZoomScale: CGFloat = 1
 
     init(
         urls: [URL],
@@ -235,6 +276,26 @@ struct FullScreenPhotoGalleryView: View {
 
     private let swipeThreshold: CGFloat = 120
 
+    private var pagingTabView: some View {
+        TabView(selection: $currentIndex) {
+            ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                FullScreenImageView(
+                    imageURL: url,
+                    onDismiss: onDismiss,
+                    onTap: { overlayVisible.toggle() },
+                    onScaleChange: { newScale in
+                        if index == currentIndex {
+                            currentPageZoomScale = newScale
+                        }
+                    }
+                )
+                .tag(index)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .indexViewStyle(.page(backgroundDisplayMode: .never))
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -246,16 +307,20 @@ struct FullScreenPhotoGalleryView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .onTapGesture(perform: onDismiss)
             } else {
-                TabView(selection: $currentIndex) {
-                    ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                        FullScreenImageView(imageURL: url, onDismiss: onDismiss) {
-                            overlayVisible.toggle()
-                        }
-                        .tag(index)
+                Group {
+                    if currentPageZoomScale > 1 {
+                        pagingTabView
+                            .highPriorityGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in }
+                            )
+                    } else {
+                        pagingTabView
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .indexViewStyle(.page(backgroundDisplayMode: .never))
+                .onChange(of: currentIndex) { _, _ in
+                    currentPageZoomScale = 1
+                }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 30)
                         .onEnded { value in

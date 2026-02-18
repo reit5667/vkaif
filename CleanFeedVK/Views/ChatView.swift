@@ -24,7 +24,7 @@ struct ChatView: View {
     @State private var replyToMessage: VKMessage? = nil
     @State private var deleteInProgress: Set<Int> = []
     @State private var pinnedMessage: VKMessage? = nil
-    @State private var showMaterialsStub = false
+    @State private var showMaterials = false
     @State private var showForwardStub = false
     @State private var showAttachMenu = false
     @State private var showPhotosPicker = false
@@ -84,7 +84,7 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showMaterialsStub = true
+                    showMaterials = true
                 } label: {
                     Image(systemName: "photo.on.rectangle.angled")
                 }
@@ -92,10 +92,12 @@ struct ChatView: View {
         }
         .onAppear { loadHistory() }
         .refreshable { loadHistory(force: true) }
-        .alert("Материалы диалога", isPresented: $showMaterialsStub) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Фотографии, видео, аудио и поиск по сообщениям — в разработке.")
+        .sheet(isPresented: $showMaterials) {
+            DialogMaterialsView(
+                peerId: peerId,
+                authService: authService,
+                vkApi: vkApi
+            )
         }
         .alert("Переслать сообщение", isPresented: $showForwardStub) {
             Button("OK", role: .cancel) { }
@@ -148,6 +150,9 @@ struct ChatView: View {
                         }
                         .listStyle(.plain)
                         .defaultScrollAnchor(.bottom)
+                        .onAppear {
+                            scrollToBottomOnEnter(proxy: proxy)
+                        }
                         .onChange(of: messages.count) { _, _ in
                             let newLastId = messages.last?.id
                             guard newLastId != lastMessageId else { return }
@@ -225,6 +230,7 @@ struct ChatView: View {
                 Button { showForwardStub = true } label: {
                     Label("Переслать", systemImage: "arrowshape.turn.up.right")
                 }
+                // messages.pin в VK API только для бесед (peer_id ≥ 2e9); для личных диалогов пункт не показываем.
                 if peerId >= 2_000_000_000 {
                     if isPinned {
                         Button { unpinCurrentMessage() } label: {
@@ -346,6 +352,14 @@ struct ChatView: View {
                 await MainActor.run { sendError = "Ошибка открепления: \(error.localizedDescription)" }
             }
         }
+    }
+
+    /// Скролл к последнему сообщению при заходе в диалог (List не всегда применяет defaultScrollAnchor вовремя).
+    private func scrollToBottomOnEnter(proxy: ScrollViewProxy) {
+        guard let last = messages.last else { return }
+        let id = last.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { proxy.scrollTo(id, anchor: .bottom) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { proxy.scrollTo(id, anchor: .bottom) }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {

@@ -78,9 +78,10 @@ struct ProfileView: View {
     /// Header + Picker сверху; контент вкладки (List) — отдельно с .frame(maxHeight: .infinity).
     /// Для вкладки «Стена» — header и посты в одном ScrollView.
     private func profileContent(user: VKUserDetail) -> some View {
-        let header = VStack(spacing: 20) {
+        let header = VStack(spacing: 24) {
             avatarSection(user: user)
             nameSection(user: user)
+                .padding(.top, 4)
             if let status = user.status, !status.isEmpty {
                 statusSection(status: status)
             }
@@ -119,9 +120,7 @@ struct ProfileView: View {
             loadTabIfNeeded(tab: newTab, user: user)
         }
         .fullScreenCover(isPresented: $isAvatarFullScreenPresented) {
-            if let urlString = user.fullScreenAvatarURL, let url = URL(string: urlString) {
-                FullScreenImageView(imageURL: url) { isAvatarFullScreenPresented = false }
-            }
+            profileMainPhotoGalleryView(user: user)
         }
         .onAppear {
             if !availableTabs.contains(selectedTab) {
@@ -194,10 +193,44 @@ struct ProfileView: View {
         }
     }
 
+    /// URL главного фото: из альбома «Фото профиля» (photos.get -6) в полном размере; иначе fallback из users.get.
+    private func mainPhotoURL(user: VKUserDetail) -> String? {
+        viewModel.profileMainPhoto?.displayURL ?? user.fullScreenAvatarURL
+    }
+
+    /// Fullscreen-галерея главного фото профиля: тот же экран, что у фото из ленты/альбома (лайки, комментарии, меню).
+    @ViewBuilder
+    private func profileMainPhotoGalleryView(user: VKUserDetail) -> some View {
+        if let urlString = mainPhotoURL(user: user), let url = URL(string: urlString) {
+            let photo = viewModel.profileMainPhoto
+            let ownerId = user.id
+            FullScreenPhotoGalleryView(
+                urls: [url],
+                initialIndex: 0,
+                onDismiss: { isAvatarFullScreenPresented = false },
+                likesCount: photo?.likes?.count,
+                commentsCount: photo?.comments?.count,
+                isLiked: photo?.likes?.userLikes == 1,
+                onLike: nil,
+                photoCommentsContext: photo.map { PhotoCommentsContext(ownerId: ownerId, photoId: $0.id) },
+                authService: authService,
+                photoIdsForSaving: photo.flatMap { p in
+                    guard let oid = p.ownerId else { return nil }
+                    return [PhotoSaveId(ownerId: oid, photoId: p.id, accessKey: p.accessKey)]
+                },
+                vkApi: vkApi,
+                getAccessToken: { authService.accessToken ?? "" },
+                isOwnPhotos: userId == nil,
+                isProfileAlbum: (userId == nil)
+            )
+        }
+    }
+
+    /// Шапка профиля: главное фото (полноразмерное из альбома -6, обрезка под прямоугольник с закруглёнными нижними углами), ниже — «Изменить фото» и имя.
     private func avatarSection(user: VKUserDetail) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             Group {
-                if let urlString = user.fullScreenAvatarURL, let url = URL(string: urlString) {
+                if let urlString = mainPhotoURL(user: user), let url = URL(string: urlString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
@@ -205,8 +238,9 @@ struct ProfileView: View {
                                 .resizable()
                                 .scaledToFill()
                         case .failure:
-                            Image(systemName: "person.circle.fill")
+                            Image(systemName: "person.crop.rectangle.fill")
                                 .resizable()
+                                .scaledToFill()
                                 .foregroundStyle(.secondary)
                         case .empty:
                             ProgressView()
@@ -214,13 +248,29 @@ struct ProfileView: View {
                             EmptyView()
                         }
                     }
-                    .frame(width: 120, height: 120)
-                    .clipShape(Circle())
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 240)
+                    .clipped()
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: 16, bottomTrailing: 16, topTrailing: 0)
+                        )
+                    )
                 } else {
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 120, height: 120)
+                    Rectangle()
+                        .fill(Color(.systemGray5))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 240)
+                        .overlay(
+                            Image(systemName: "person.crop.rectangle.fill")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.secondary)
+                        )
+                        .clipShape(
+                            UnevenRoundedRectangle(
+                                cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: 16, bottomTrailing: 16, topTrailing: 0)
+                            )
+                        )
                 }
             }
             .onTapGesture { isAvatarFullScreenPresented = true }
