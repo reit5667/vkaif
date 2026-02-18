@@ -70,6 +70,10 @@
 - Декод getHistory: VKMessage с decodeIfPresent для from_id/peer_id/date; FailableDecode для items (4.5).
 - Автоскролл вниз при открытии диалога.
 - Подгрузка старых: totalCount при пустом ответе.
+- 4.1. Ошибка загрузки фото в диалог: OwnerPhotoUploadResult.init — decodeIfPresent(String) бросал typeMismatch при Int-значении server; исправлено на try?. Выделен uploadMessagesPhotoToServer с HTTP-проверкой и логированием.
+- 4.2 (частично): contextMenu по long press — Ответить, Скопировать, Переслать (стаб), Закрепить/Открепить только для бесед (peer_id ≥ 2e9), Удалить (свои). Pinned banner, reply preview (VKReplyMessage). Кнопка «+» с sheet для вложений, кнопка отправки крупнее.
+- Фото в сообщениях: VKMessage.attachments ([VKAttachment]), thumbnail в пузырьке (messagePhotoGrid), тап → FullScreenPhotoGalleryView (сохранённые, закрытие).
+- Скролл чата: добавлен defaultScrollAnchor(.bottom); по отзыву пользователя при заходе всё ещё открывается посередине — задача 4.2b в статусе.
 
 ---
 
@@ -80,4 +84,4 @@
 - VideoPlayerView: VideoWebView, videoBridgeScript.
 - VKApiService: все методы выше.
 - ProfileTabsView: ProfileWallTabView, ProfileFriendsTabView, ProfileGroupsTabView (embeddedInScroll).
-- ChatView: messagesList, loadHistory, loadMoreHistory, scrollToBottom.
+- ChatView: messagesList, loadHistory, loadMoreHistory, scrollToBottom, messageRow (reply preview, messagePhotoGrid), contextMenu, pinnedBanner, attachMenu, fullScreenCover FullScreenPhotoGalleryView.

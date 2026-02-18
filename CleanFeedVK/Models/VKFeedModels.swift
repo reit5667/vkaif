@@ -726,7 +726,7 @@ struct OwnerPhotoUploadResult: Decodable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let s = try c.decodeIfPresent(String.self, forKey: .server) {
+        if let s = try? c.decodeIfPresent(String.self, forKey: .server) {
             server = s
         } else if let n = try c.decodeIfPresent(Int.self, forKey: .server) {
             server = String(n)
@@ -877,6 +877,26 @@ struct MessagesGetConversationsResponse: Decodable {
     }
 }
 
+/// Цитата (reply_message) внутри сообщения. Отдельный тип во избежание рекурсивного хранения struct.
+struct VKReplyMessage: Decodable {
+    let id: Int
+    let fromId: Int
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fromId = "from_id"
+        case text
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id) ?? 0
+        fromId = try c.decodeIfPresent(Int.self, forKey: .fromId) ?? 0
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+    }
+}
+
 /// Сообщение в истории (messages.getHistory). Поля from_id/peer_id/date могут отсутствовать в action-сообщениях и др. — декодируем с дефолтами.
 struct VKMessage: Decodable {
     let id: Int
@@ -886,6 +906,8 @@ struct VKMessage: Decodable {
     let text: String
     let out: Int?
     let readState: Int?
+    let replyMessage: VKReplyMessage?
+    let attachments: [VKAttachment]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -895,6 +917,8 @@ struct VKMessage: Decodable {
         case text
         case out
         case readState = "read_state"
+        case replyMessage = "reply_message"
+        case attachments
     }
 
     init(from decoder: Decoder) throws {
@@ -907,6 +931,8 @@ struct VKMessage: Decodable {
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         out = try c.decodeIfPresent(Int.self, forKey: .out)
         readState = try c.decodeIfPresent(Int.self, forKey: .readState)
+        replyMessage = try c.decodeIfPresent(VKReplyMessage.self, forKey: .replyMessage)
+        attachments = try c.decodeIfPresent([VKAttachment].self, forKey: .attachments)
     }
 
     /// Локальное сообщение после отправки (оптимистичное отображение).
@@ -918,6 +944,8 @@ struct VKMessage: Decodable {
         self.text = text
         self.out = out
         self.readState = readState
+        self.replyMessage = nil
+        self.attachments = nil
     }
 }
 

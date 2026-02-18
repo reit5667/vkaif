@@ -23,7 +23,14 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var replyToMessage: VKMessage? = nil
     @State private var deleteInProgress: Set<Int> = []
+    @State private var pinnedMessage: VKMessage? = nil
     @State private var showMaterialsStub = false
+    @State private var showForwardStub = false
+    @State private var showAttachMenu = false
+    @State private var showPhotosPicker = false
+    @State private var galleryPhotos: [VKPhoto] = []
+    @State private var galleryIndex: Int = 0
+    @State private var showGallery = false
 
     private let vkApi = VKApiService()
     private let pageSize = 30
@@ -57,6 +64,9 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let pinned = pinnedMessage {
+                pinnedBanner(pinned)
+            }
             if let err = sendError {
                 Text(err)
                     .font(.caption)
@@ -86,6 +96,26 @@ struct ChatView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Фотографии, видео, аудио и поиск по сообщениям — в разработке.")
+        }
+        .alert("Переслать сообщение", isPresented: $showForwardStub) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Пересылка сообщений — в разработке.")
+        }
+        .fullScreenCover(isPresented: $showGallery) {
+            let urls = galleryPhotos.compactMap { URL(string: $0.displayURL ?? "") }
+            let saveIds = galleryPhotos.compactMap { p -> PhotoSaveId? in
+                guard let ownerId = p.ownerId else { return nil }
+                return PhotoSaveId(ownerId: ownerId, photoId: p.id, accessKey: p.accessKey)
+            }
+            FullScreenPhotoGalleryView(
+                urls: urls,
+                initialIndex: galleryIndex,
+                onDismiss: { showGallery = false },
+                photoIdsForSaving: saveIds,
+                vkApi: vkApi,
+                getAccessToken: { authService.accessToken ?? "" }
+            )
         }
     }
 
@@ -117,23 +147,12 @@ struct ChatView: View {
                             }
                         }
                         .listStyle(.plain)
-                        .onChange(of: messages.count) { oldCount, newCount in
+                        .defaultScrollAnchor(.bottom)
+                        .onChange(of: messages.count) { _, _ in
                             let newLastId = messages.last?.id
-                            if newLastId != lastMessageId {
-                                lastMessageId = newLastId
-                                scrollToBottom(proxy: proxy)
-                            }
-                        }
-                        .onAppear {
-                            lastMessageId = messages.last?.id
+                            guard newLastId != lastMessageId else { return }
+                            lastMessageId = newLastId
                             scrollToBottom(proxy: proxy)
-                        }
-                        .onChange(of: loadState) { _, newState in
-                            if case .loaded = newState {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                    scrollToBottom(proxy: proxy)
-                                }
-                            }
                         }
                     }
                 }
@@ -152,18 +171,77 @@ struct ChatView: View {
     private func messageRow(_ msg: VKMessage) -> some View {
         let isOut = (msg.out ?? 0) == 1
         let deleting = deleteInProgress.contains(msg.id)
+        let isPinned = pinnedMessage?.id == msg.id
         return HStack {
             if isOut { Spacer(minLength: 48) }
             VStack(alignment: isOut ? .trailing : .leading, spacing: 2) {
-                Text(msg.text)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .opacity(deleting ? 0.5 : 1.0)
+                let photos = (msg.attachments ?? []).compactMap { $0.photo }
+                VStack(alignment: isOut ? .trailing : .leading, spacing: 6) {
+                    if let reply = msg.replyMessage {
+                        HStack(spacing: 6) {
+                            Rectangle()
+                                .frame(width: 2)
+                                .foregroundStyle(Color.accentColor)
+                                .clipShape(RoundedRectangle(cornerRadius: 1))
+                            Text(reply.text.isEmpty ? "[Фото]" : reply.text)
+                                .font(.caption)
+                                .lineLimit(2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 6)
+                    }
+                    if !msg.text.isEmpty {
+                        Text(msg.text)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, msg.replyMessage == nil && photos.isEmpty ? 8 : 0)
+                            .padding(.top, msg.replyMessage != nil ? 0 : (photos.isEmpty ? 0 : 8))
+                            .padding(.bottom, photos.isEmpty ? 8 : 0)
+                    }
+                    if !photos.isEmpty {
+                        messagePhotoGrid(photos, msgId: msg.id)
+                            .padding(.top, msg.text.isEmpty && msg.replyMessage == nil ? 0 : 4)
+                    }
+                }
+                .padding(.vertical, msg.text.isEmpty && msg.replyMessage == nil && !photos.isEmpty ? 0 : 0)
+                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .opacity(deleting ? 0.5 : 1.0)
                 Text(shortTime(msg.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+            .contextMenu {
+                Button { replyToMessage = msg } label: {
+                    Label("Ответить", systemImage: "arrowshape.turn.up.left")
+                }
+                if !msg.text.isEmpty {
+                    Button {
+                        UIPasteboard.general.string = msg.text
+                    } label: {
+                        Label("Скопировать", systemImage: "doc.on.doc")
+                    }
+                }
+                Button { showForwardStub = true } label: {
+                    Label("Переслать", systemImage: "arrowshape.turn.up.right")
+                }
+                if peerId >= 2_000_000_000 {
+                    if isPinned {
+                        Button { unpinCurrentMessage() } label: {
+                            Label("Открепить", systemImage: "pin.slash")
+                        }
+                    } else {
+                        Button { pinCurrentMessage(msg) } label: {
+                            Label("Закрепить", systemImage: "pin")
+                        }
+                    }
+                }
+                if isOut {
+                    Divider()
+                    Button(role: .destructive) { deleteMessage(msg) } label: {
+                        Label("Удалить", systemImage: "trash")
+                    }
+                }
             }
             if !isOut { Spacer(minLength: 48) }
         }
@@ -188,12 +266,92 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
+    private func messagePhotoGrid(_ photos: [VKPhoto], msgId: Int) -> some View {
+        let columns = photos.count == 1
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)]
+        LazyVGrid(columns: columns, spacing: 2) {
+            ForEach(Array(photos.enumerated()), id: \.offset) { idx, photo in
+                let thumbUrl = photo.feedPreviewURL.flatMap { URL(string: $0) }
+                AsyncImage(url: thumbUrl) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: photos.count == 1 ? 200 : 120)
+                .clipped()
+                .onTapGesture {
+                    let allPhotos = photos
+                    galleryPhotos = allPhotos
+                    galleryIndex = idx
+                    showGallery = true
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func pinnedBanner(_ msg: VKMessage) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pin.fill")
+                .font(.caption)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Закреплённое сообщение")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(msg.text.isEmpty ? "[Фото]" : msg.text)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button { unpinCurrentMessage() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(.systemGray6))
+    }
+
+    private func pinCurrentMessage(_ msg: VKMessage) {
+        guard let token = authService.accessToken else { return }
+        Task {
+            do {
+                let pinned = try await vkApi.pinMessage(token: token, peerId: peerId, messageId: msg.id)
+                await MainActor.run { pinnedMessage = pinned }
+            } catch {
+                await MainActor.run { sendError = "Ошибка закрепления: \(error.localizedDescription)" }
+            }
+        }
+    }
+
+    private func unpinCurrentMessage() {
+        guard let token = authService.accessToken else { return }
+        Task {
+            do {
+                try await vkApi.unpinMessage(token: token, peerId: peerId)
+                await MainActor.run { pinnedMessage = nil }
+            } catch {
+                await MainActor.run { sendError = "Ошибка открепления: \(error.localizedDescription)" }
+            }
+        }
+    }
+
     private func scrollToBottom(proxy: ScrollViewProxy) {
         guard let last = messages.last else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 
@@ -241,19 +399,19 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            PhotosPicker(
-                selection: $selectedPhotoItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Image(systemName: "photo.circle.fill")
-                    .font(.title2)
+            Button {
+                showAttachMenu = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title)
             }
             .disabled(sending)
-            .onChange(of: selectedPhotoItem) { _, newItem in
-                guard let item = newItem else { return }
-                Task { await sendPhoto(from: item) }
+            .sheet(isPresented: $showAttachMenu) {
+                attachMenu
+                    .presentationDetents([.height(120)])
+                    .presentationDragIndicator(.visible)
             }
+
             TextField("Сообщение", text: $inputText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
@@ -265,7 +423,7 @@ struct ChatView: View {
                         .scaleEffect(0.8)
                 } else {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                        .font(.title)
                 }
             }
             .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
@@ -273,6 +431,26 @@ struct ChatView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color(.systemBackground))
+    }
+
+    private var attachMenu: some View {
+        VStack(spacing: 0) {
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Label("Фото из галереи", systemImage: "photo")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                showAttachMenu = false
+                guard let item = newItem else { return }
+                Task { await sendPhoto(from: item) }
+            }
+            Divider()
+        }
     }
 
     private func shortTime(_ date: Date) -> String {
@@ -377,7 +555,7 @@ struct ChatView: View {
             }
             let jpegData = imageData.dataAsJpeg
             let uploadUrl = try await vkApi.getMessagesUploadServer(token: token, peerId: peerId)
-            let (server, hash, photo) = try await vkApi.uploadOwnerPhotoToServer(uploadUrl: uploadUrl, imageData: jpegData)
+            let (server, hash, photo) = try await vkApi.uploadMessagesPhotoToServer(uploadUrl: uploadUrl, imageData: jpegData)
             let saved = try await vkApi.saveMessagesPhoto(token: token, server: server, hash: hash, photo: photo)
             let attachment = "photo\(saved.ownerId)_\(saved.id)"
             let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1039,7 +1039,78 @@ final class VKApiService: Sendable {
         logger?.info("VKApi", "messages.delete ok")
     }
 
+    // MARK: - messages.pin / messages.unpin
+
+    /// Закрепить сообщение в диалоге. Возвращает закреплённое сообщение.
+    func pinMessage(token: String, peerId: Int, messageId: Int) async throws -> VKMessage {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "message_id", value: String(messageId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.pin") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "messages.pin peerId=\(peerId) messageId=\(messageId)")
+        return try await requestVK(VKMessage.self, from: request)
+    }
+
+    /// Открепить закреплённое сообщение в диалоге.
+    func unpinMessage(token: String, peerId: Int) async throws {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.unpin") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "messages.unpin peerId=\(peerId)")
+        let _: Int = try await requestVK(Int.self, from: request)
+        logger?.info("VKApi", "messages.unpin ok")
+    }
+
     // MARK: - photos.getMessagesUploadServer / photos.saveMessagesPhoto (фото в личку)
+
+    /// Загрузить фото на upload_url для сообщений. Проверяет HTTP-статус и логирует тело ответа при ошибке.
+    func uploadMessagesPhotoToServer(uploadUrl: String, imageData: Data) async throws -> (server: String, hash: String, photo: String) {
+        guard let url = URL(string: uploadUrl) else { throw VKApiError.invalidURL }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+        let (data, response) = try await network.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            let preview = String(data: data, encoding: .utf8).map { $0.count > 300 ? String($0.prefix(300)) + "…" : $0 } ?? "nil"
+            logger?.error("VKApi", "uploadMessagesPhoto HTTP \(http.statusCode): \(preview)")
+            throw VKApiError.apiError(code: http.statusCode, message: "Ошибка загрузки фото (\(http.statusCode))")
+        }
+        do {
+            let result = try decoder.decode(OwnerPhotoUploadResult.self, from: data)
+            guard let server = result.server, let hash = result.hash, let photo = result.photo else {
+                throw VKApiError.apiError(code: -1, message: "Некорректный ответ загрузки фото")
+            }
+            return (server, hash, photo)
+        } catch {
+            let preview = String(data: data, encoding: .utf8).map { $0.count > 500 ? String($0.prefix(500)) + "…" : $0 } ?? "nil"
+            logger?.error("VKApi", "uploadMessagesPhoto decode failed: \(preview)", error: error)
+            throw error
+        }
+    }
 
     /// URL для загрузки фото в диалог (peer_id — собеседник или беседа).
     func getMessagesUploadServer(token: String, peerId: Int) async throws -> String {
