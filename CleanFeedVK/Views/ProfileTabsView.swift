@@ -159,6 +159,7 @@ struct ProfileWallTabView: View {
             },
             onRepostToWall: { repostToWall(post) },
             onRepostDM: { showRepostDMStub = true },
+            onRepostSuccessFromGallery: { newCount in postRepostOverrides[post.postId] = newCount },
             onDelete: { deletePost(post) },
             onPin: isOwnProfile ? { pinPost(post) } : nil,
             onUnpin: isOwnProfile ? { unpinPost(post) } : nil,

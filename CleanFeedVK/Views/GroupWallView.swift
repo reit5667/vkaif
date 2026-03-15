@@ -207,6 +207,17 @@ struct GroupWallView: View {
                 onRepostToWall: repostToWallAction,
                 onRepostToDM: { showRepostDMStub = true },
                 repostInProgress: repostLoading,
+                canDeletePost: false,
+                onDelete: nil,
+                deleteInProgress: false,
+                canPinPost: false,
+                isPinned: false,
+                onPin: nil,
+                onUnpin: nil,
+                pinInProgress: false,
+                onDeletePhoto: nil,
+                onMakeProfilePhoto: nil,
+                onRepostSuccessFromGallery: { newCount in postRepostOverrides[post.postId] = newCount },
                 vkApi: vkApi,
                 getAccessToken: { authService.accessToken ?? "" }
             )

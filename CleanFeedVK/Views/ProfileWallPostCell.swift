@@ -22,6 +22,8 @@ struct ProfileWallPostCell: View {
     let onTapVideo: (VKVideo, Int, VKPost) async -> Void
     let onRepostToWall: () -> Void
     let onRepostDM: () -> Void
+    /// После успешного репоста из fullscreen галереи.
+    var onRepostSuccessFromGallery: ((Int) -> Void)? = nil
     let onDelete: () -> Void
     let onPin: (() -> Void)?
     let onUnpin: (() -> Void)?
@@ -78,6 +80,7 @@ struct ProfileWallPostCell: View {
             pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhotoArg,
             onMakeProfilePhoto: makeProfile,
+            onRepostSuccessFromGallery: onRepostSuccessFromGallery,
             vkApi: vkApi,
             getAccessToken: tokenProvider
         )

@@ -65,6 +65,12 @@ struct FullScreenImageView: View {
                             onScaleChange?(scale)
                         }
                 )
+                .modifier(PanWhenZoomedModifier(
+                    scale: scale,
+                    viewSize: viewSize,
+                    lastPanOffset: $lastPanOffset,
+                    panOffset: $panOffset
+                ))
                 .gesture(
                     SpatialTapGesture(count: 2)
                         .onEnded { event in
@@ -91,24 +97,6 @@ struct FullScreenImageView: View {
                             }
                         }
                 )
-                .gesture(
-                    DragGesture(minimumDistance: 8)
-                        .onChanged { value in
-                            guard scale > 1 else { return }
-                            let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
-                            let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
-                            var next = CGSize(
-                                width: lastPanOffset.width + value.translation.width,
-                                height: lastPanOffset.height + value.translation.height
-                            )
-                            next.width = min(maxW, max(-maxW, next.width))
-                            next.height = min(maxH, max(-maxH, next.height))
-                            panOffset = next
-                        }
-                        .onEnded { _ in
-                            lastPanOffset = panOffset
-                        }
-                )
                 .onChange(of: scale) { _, newScale in
                     if newScale <= 1 {
                         panOffset = .zero
@@ -133,6 +121,38 @@ struct FullScreenImageView: View {
             } else {
                 onDismiss()
             }
+        }
+    }
+}
+
+/// Пан по картинке только при scale > 1; при scale == 1 жест не вешается, чтобы TabView получал свайпы для перелистывания.
+private struct PanWhenZoomedModifier: ViewModifier {
+    let scale: CGFloat
+    let viewSize: CGSize
+    @Binding var lastPanOffset: CGSize
+    @Binding var panOffset: CGSize
+
+    func body(content: Content) -> some View {
+        if scale > 1 {
+            content.simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
+                        let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
+                        var next = CGSize(
+                            width: lastPanOffset.width + value.translation.width,
+                            height: lastPanOffset.height + value.translation.height
+                        )
+                        next.width = min(maxW, max(-maxW, next.width))
+                        next.height = min(maxH, max(-maxH, next.height))
+                        panOffset = next
+                    }
+                    .onEnded { _ in
+                        lastPanOffset = panOffset
+                    }
+            )
+        } else {
+            content
         }
     }
 }
@@ -185,6 +205,10 @@ struct FullScreenPhotoGalleryView: View {
     var isProfileAlbum: Bool = false
     /// Сделать текущее фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
+    /// Для репоста из галереи поста: object = "wall{owner_id}_{post_id}". nil = кнопка репоста неактивна/заглушка.
+    var repostObject: String? = nil
+    /// После успешного wall.repost вызывается с новым reposts_count (чтобы обновить счётчик в ленте).
+    var onRepostSuccess: ((Int) -> Void)? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
@@ -214,7 +238,10 @@ struct FullScreenPhotoGalleryView: View {
     @State private var shareFileURL: URL? = nil
     @State private var showShareSheet = false
     @State private var shareInProgress = false
-    @State private var showRepostStub = false
+    /// Локальный счётчик репостов после успешного wall.repost в галерее.
+    @State private var repostsCountOverride: Int? = nil
+    @State private var repostInProgress = false
+    @State private var showRepostSuccessToast = false
     /// Масштаб текущей страницы: при > 1 не листаем (пан по картинке).
     @State private var currentPageZoomScale: CGFloat = 1
 
@@ -239,7 +266,9 @@ struct FullScreenPhotoGalleryView: View {
         isOwnPhotos: Bool = false,
         onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil,
         isProfileAlbum: Bool = false,
-        onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
+        onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil,
+        repostObject: String? = nil,
+        onRepostSuccess: ((Int) -> Void)? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -262,11 +291,14 @@ struct FullScreenPhotoGalleryView: View {
         self.onDeletePhoto = onDeletePhoto
         self.isProfileAlbum = isProfileAlbum
         self.onMakeProfilePhoto = onMakeProfilePhoto
+        self.repostObject = repostObject
+        self.onRepostSuccess = onRepostSuccess
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
         _capturedTokenForSave = State(initialValue: initialAccessToken)
     }
 
     private var displayLiked: Bool { likedOverride ?? isLiked }
+    private var displayRepostsCount: Int { repostsCountOverride ?? repostsCount ?? 0 }
     private var displayLikesCount: Int {
         guard let n = likesCount else { return 0 }
         if likedOverride == true, !isLiked { return n + 1 }
@@ -316,21 +348,21 @@ struct FullScreenPhotoGalleryView: View {
                             )
                     } else {
                         pagingTabView
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 30)
+                                    .onEnded { value in
+                                        let dy = value.translation.height
+                                        let dx = value.translation.width
+                                        if dy > swipeThreshold && dy > abs(dx) {
+                                            onDismiss()
+                                        }
+                                    }
+                            )
                     }
                 }
                 .onChange(of: currentIndex) { _, _ in
                     currentPageZoomScale = 1
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 30)
-                        .onEnded { value in
-                            let dy = value.translation.height
-                            let dx = value.translation.width
-                            if dy > swipeThreshold && dy > abs(dx) {
-                                onDismiss()
-                            }
-                        }
-                )
 
                 if overlayVisible {
                     VStack(spacing: 0) {
@@ -484,7 +516,7 @@ struct FullScreenPhotoGalleryView: View {
                             showActionsOverlay = false
                             shareCurrentPhoto()
                         } label: {
-                            Label(shareInProgress ? "Загрузка…" : "Поделиться", systemImage: "square.and.arrow.up")
+                            Label(shareInProgress ? "Загрузка…" : "Отправить в …", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .foregroundStyle(.primary)
@@ -525,6 +557,20 @@ struct FullScreenPhotoGalleryView: View {
                     VStack {
                         Spacer(minLength: 0)
                         Text("Не удалось сохранить")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
+                if showRepostSuccessToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text("Репост выполнен")
                             .font(.subheadline)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
@@ -642,10 +688,32 @@ struct FullScreenPhotoGalleryView: View {
                 ShareSheet(activityItems: [u])
             }
         }
-        .alert("Репост", isPresented: $showRepostStub) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Репост записи из fullscreen — в разработке.")
+    }
+
+    /// Репост поста на свою стену (wall.repost). Вызывается из нижней панели при repostObject != nil.
+    private func performRepost() {
+        guard let object = repostObject, !object.isEmpty, let api = vkApi else { return }
+        let token = getAccessToken?() ?? authService?.accessToken ?? capturedTokenForSave
+        guard !token.isEmpty, !repostInProgress else { return }
+        repostInProgress = true
+        Task {
+            do {
+                let response = try await api.wallRepost(token: token, object: object)
+                await MainActor.run {
+                    repostInProgress = false
+                    if let newCount = response.repostsCount {
+                        repostsCountOverride = newCount
+                        onRepostSuccess?(newCount)
+                        showRepostSuccessToast = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            showRepostSuccessToast = false
+                        }
+                    }
+                }
+            } catch {
+                AppLogger.shared.error("Gallery", "wall.repost failed", error: error)
+                await MainActor.run { repostInProgress = false }
+            }
         }
     }
 
@@ -743,32 +811,20 @@ struct FullScreenPhotoGalleryView: View {
 
             Spacer(minLength: 0)
 
-            // Репосты: кнопка (иконка + цифра); тап — заглушка «Скоро»
+            // Репосты: кнопка (иконка + цифра); тап — wall.repost при repostObject != nil
             Button {
-                showRepostStub = true
+                performRepost()
             } label: {
-                bottomBarIconWithCount(icon: "arrowshape.turn.up.right", count: repostsCount ?? 0)
+                if repostInProgress {
+                    ProgressView().tint(.white)
+                } else {
+                    bottomBarIconWithCount(icon: "arrowshape.turn.up.right", count: displayRepostsCount)
+                }
             }
             .font(.title2)
             .foregroundStyle(.white)
             .buttonStyle(.plain)
-
-            if currentIndex >= 0, currentIndex < urls.count {
-                Spacer(minLength: 0)
-                Button {
-                    shareCurrentPhoto()
-                } label: {
-                    if shareInProgress {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                }
-                .font(.title2)
-                .foregroundStyle(.white)
-                .buttonStyle(.plain)
-                .disabled(shareInProgress)
-            }
+            .disabled(repostInProgress || (repostObject == nil))
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)

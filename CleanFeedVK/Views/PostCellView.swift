@@ -112,6 +112,8 @@ struct PostCellView: View {
     var onDeletePhoto: ((String, Int, Int) async -> Bool)? = nil
     /// Сделать фото главным в профиле (photos.makeCover). Возвращает (успех, сообщение об ошибке). nil = пункт не показывать.
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
+    /// После успешного репоста из fullscreen галереи — обновить счётчик в ленте (новый reposts_count).
+    var onRepostSuccessFromGallery: ((Int) -> Void)? = nil
 
     @Environment(\.makeProfilePhotoForGallery) private var makeProfilePhotoFromEnvironment
     @State private var isTextExpanded = false
@@ -239,13 +241,14 @@ struct PostCellView: View {
             : nil as ((String, Int, Int) async -> Bool)?
         let photoIds: [PhotoSaveId]? = photoIdsForSavingFromPost.isEmpty ? nil : photoIdsForSavingFromPost
         let makeProfile: ((String, Int, Int) async -> (Bool, String?))? = canDeletePost ? (onMakeProfilePhoto ?? makeProfilePhotoFromEnvironment) : nil as ((String, Int, Int) async -> (Bool, String?))?
+        let repostObject = "wall\(ownerId)_\(post.id)"
         let gallery: FullScreenPhotoGalleryView = FullScreenPhotoGalleryView(
             urls: photoDisplayURLsAsURLs,
             initialIndex: min(idx, photoDisplayURLsAsURLs.count - 1),
             onDismiss: { fullScreenPhotoIndex = nil },
             likesCount: displayLikesCount,
             commentsCount: post.commentsCount,
-            repostsCount: post.repostsCount,
+            repostsCount: repostsCountOverride ?? post.repostsCount,
             isLiked: displayIsLiked,
             onLike: onLikeAction,
             onTapComments: onTapComments,
@@ -258,7 +261,9 @@ struct PostCellView: View {
             isOwnPhotos: canDeletePost,
             onDeletePhoto: deletePhoto,
             isProfileAlbum: canDeletePost,
-            onMakeProfilePhoto: makeProfile
+            onMakeProfilePhoto: makeProfile,
+            repostObject: repostObject,
+            onRepostSuccess: onRepostSuccessFromGallery
         )
         return gallery
     }

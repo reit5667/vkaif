@@ -33,6 +33,8 @@ struct FeedPostRowCell: View {
     let pinInProgress: Bool
     let onDeletePhoto: ((String, Int, Int) async -> Bool)?
     var onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil
+    /// После успешного репоста из fullscreen галереи — обновить счётчик (новый reposts_count).
+    var onRepostSuccessFromGallery: ((Int) -> Void)? = nil
     let vkApi: VKApiService?
     let getAccessToken: () -> String
 
@@ -70,6 +72,7 @@ struct FeedPostRowCell: View {
             pinInProgress: pinInProgress,
             onDeletePhoto: onDeletePhoto,
             onMakeProfilePhoto: onMakeProfilePhoto,
+            onRepostSuccessFromGallery: onRepostSuccessFromGallery,
             vkApi: vkApi,
             getAccessToken: getAccessToken
         )

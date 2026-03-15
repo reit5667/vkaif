@@ -314,6 +314,7 @@ struct ContentView: View {
             pinInProgress: pinInProgress.contains(post.postId),
             onDeletePhoto: onDeletePhotoAction,
             onMakeProfilePhoto: onMakeProfilePhotoAction,
+            onRepostSuccessFromGallery: { newCount in postRepostOverrides[post.postId] = newCount },
             vkApi: vkApi,
             getAccessToken: { authService.accessToken ?? "" }
         )
