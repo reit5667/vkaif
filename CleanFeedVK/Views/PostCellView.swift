@@ -1,41 +1,5 @@
 import SwiftUI
-import UIKit
 
-// MARK: - Justified text (SwiftUI не поддерживает .justified нативно)
-
-private struct JustifiedTextView: UIViewRepresentable {
-    let text: String
-    let font: UIFont
-    var lineLimit: Int? = nil
-
-    func makeUIView(context: Context) -> UITextView {
-        let tv = UITextView()
-        tv.textAlignment = .justified
-        tv.font = font
-        tv.textColor = .label
-        tv.backgroundColor = .clear
-        tv.isScrollEnabled = false
-        tv.isEditable = false
-        tv.isSelectable = false
-        tv.textContainerInset = .zero
-        tv.textContainer.lineFragmentPadding = 0
-        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return tv
-    }
-
-    func updateUIView(_ uiView: UITextView, context: Context) {
-        uiView.text = text
-        uiView.font = font
-        uiView.textContainer.maximumNumberOfLines = lineLimit ?? 0
-        uiView.textContainer.lineBreakMode = (lineLimit != nil) ? .byTruncatingTail : .byWordWrapping
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? UIScreen.main.bounds.width
-        let fittingSize = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: width, height: fittingSize.height)
-    }
-}
 
 // MARK: - Переопределение опроса после голосования (оптимистичное отображение)
 
@@ -363,11 +327,11 @@ struct PostCellView: View {
 
     private var bodyText: some View {
         VStack(alignment: .leading, spacing: 4) {
-            JustifiedTextView(
-                text: post.text,
-                font: .preferredFont(forTextStyle: .body),
-                lineLimit: isTextExpanded ? nil : textLineLimitCollapsed
-            )
+            Text(post.text)
+                .font(.body)
+                .multilineTextAlignment(.leading)
+                .lineLimit(isTextExpanded ? nil : textLineLimitCollapsed)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if post.text.count > 100 {
                 Button(isTextExpanded ? "Свернуть" : "Показать ещё") {
@@ -670,7 +634,9 @@ struct PostCellView: View {
                 Spacer(minLength: 0)
             }
             if !repost.text.isEmpty {
-                JustifiedTextView(text: repost.text, font: .preferredFont(forTextStyle: .subheadline))
+                Text(repost.text)
+                    .font(.subheadline)
+                    .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !repostPhotoURLs.isEmpty {
@@ -784,12 +750,32 @@ func relativeDateString(from date: Date) -> String {
     return formatter.localizedString(for: date, relativeTo: Date())
 }
 
-/// Календарная дата поста: "15 янв 2025" или "15 января" для отображения в ячейке.
+/// Календарная дата поста с временем:
+/// - сегодня → "14:32"
+/// - текущий год → "3 апр в 14:32"
+/// - другой год → "15 янв 2025 в 14:32"
 func calendarDateString(from date: Date) -> String {
+    let cal = Calendar.current
+    let now = Date()
     let f = DateFormatter()
     f.locale = Locale(identifier: "ru_RU")
+
+    let timeStr: String = {
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }()
+
+    if cal.isDateInToday(date) {
+        return timeStr
+    }
+
+    if cal.component(.year, from: date) == cal.component(.year, from: now) {
+        f.dateFormat = "d MMM"
+        return "\(f.string(from: date)) в \(timeStr)"
+    }
+
     f.dateFormat = "d MMM yyyy"
-    return f.string(from: date)
+    return "\(f.string(from: date)) в \(timeStr)"
 }
 
 /// Имя автора поста: из profiles (положительный fromId) или groups (отрицательный ownerId).

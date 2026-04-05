@@ -10,6 +10,8 @@ struct FullScreenImageView: View {
     var onTap: (() -> Void)? = nil
     /// При изменении scale вызывается (для галереи: при scale > 1 не листать страницы).
     var onScaleChange: ((CGFloat) -> Void)? = nil
+    /// Свайп вниз: только при scale == 1. Используется внутри TabView — жест вешается на ячейку (не на TabView), что сохраняет горизонтальное листание.
+    var onSwipeDown: (() -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -122,6 +124,17 @@ struct FullScreenImageView: View {
                 onDismiss()
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    guard scale <= 1 else { return }
+                    let dy = value.translation.height
+                    let dx = value.translation.width
+                    if dy > 120 && dy > abs(dx) {
+                        onSwipeDown?()
+                    }
+                }
+        )
     }
 }
 
@@ -324,8 +337,6 @@ struct FullScreenPhotoGalleryView: View {
         return n
     }
 
-    private let swipeThreshold: CGFloat = 120
-
     private var pagingTabView: some View {
         TabView(selection: $currentIndex) {
             ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
@@ -337,7 +348,8 @@ struct FullScreenPhotoGalleryView: View {
                         if index == currentIndex {
                             currentPageZoomScale = newScale
                         }
-                    }
+                    },
+                    onSwipeDown: onDismiss
                 )
                 .tag(index)
             }
@@ -366,16 +378,6 @@ struct FullScreenPhotoGalleryView: View {
                             )
                     } else {
                         pagingTabView
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 30)
-                                    .onEnded { value in
-                                        let dy = value.translation.height
-                                        let dx = value.translation.width
-                                        if dy > swipeThreshold && dy > abs(dx) {
-                                            onDismiss()
-                                        }
-                                    }
-                            )
                     }
                 }
                 .onChange(of: currentIndex) { _, _ in

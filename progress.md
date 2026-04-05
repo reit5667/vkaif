@@ -8,6 +8,8 @@
 
 ## 2026-04-05
 
-- Закрыта `TASK-004` — удаление фото из альбома.
-- Найден и задокументирован Swift ABI-баг ARM64: `@escaping async` замыкание `(String, Int, Int)` получает мусор в Int-параметрах. Обходное решение: `GalleryDeleteRequest` (ref-type класс), shared через `@State`; photoId записывается синхронно до `await`. Детали — в `TECHNICAL_NOTES.md`.
-- Следующий трек: `TASK-005` (justified-текст в постах).
+- Закрыта `TASK-004` — удаление фото из альбома (Swift ABI ARM64 bug fix, GalleryDeleteRequest).
+- Закрыта `TASK-005` — убран JustifiedTextView, заменён на SwiftUI Text + .leading.
+- Закрыта `TASK-006` — добавлено время к дате поста (ru_RU DateFormatter).
+- Закрыты `TASK-023` + `TASK-024` — исправлен свайп переключения фото в fullscreen-галерее; dismiss-жест перенесён на уровень ячейки и работает только при zoom = 1.
+- Перенесён `backlog.md` в корень проекта (из Obsidian Vault).
