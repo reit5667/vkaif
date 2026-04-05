@@ -31,6 +31,7 @@ struct ChatView: View {
     @State private var galleryPhotos: [VKPhoto] = []
     @State private var galleryIndex: Int = 0
     @State private var showGallery = false
+    @State private var anchorMessageId: Int? = nil
 
     private let vkApi = VKApiService()
     private let pageSize = 30
@@ -158,6 +159,13 @@ struct ChatView: View {
                             guard newLastId != lastMessageId else { return }
                             lastMessageId = newLastId
                             scrollToBottom(proxy: proxy)
+                        }
+                        .onChange(of: anchorMessageId) { _, id in
+                            guard let id else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                proxy.scrollTo(id, anchor: .top)
+                                anchorMessageId = nil
+                            }
                         }
                     }
                 }
@@ -502,16 +510,21 @@ struct ChatView: View {
         guard case .loaded = loadState, messages.count < totalCount, !isLoadingMore else { return }
         isLoadingMore = true
         let offset = messages.count
+        let currentTopId = messages.first?.id
         Task {
             do {
                 let res = try await vkApi.getHistory(token: token, peerId: peerId, count: pageSize, offset: offset)
                 await MainActor.run {
-                    let older = res.items.reversed()
+                    let older = Array(res.items.reversed())
                     messages = older + messages
                     if res.items.isEmpty {
                         totalCount = messages.count
                     }
                     isLoadingMore = false
+                    // Скроллим к тому сообщению, которое было вверху до загрузки.
+                    // Это убирает ProgressView из viewport → при следующем скролле вверх
+                    // .onAppear сработает снова и подгрузит следующий батч.
+                    anchorMessageId = currentTopId
                 }
             } catch {
                 await MainActor.run { isLoadingMore = false }

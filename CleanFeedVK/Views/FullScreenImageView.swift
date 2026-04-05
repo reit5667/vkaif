@@ -166,6 +166,16 @@ struct PhotoSaveId: Hashable {
     let accessKey: String?
 }
 
+// MARK: - Контейнер photoId для обхода ABI-бага
+
+/// Разделяемый ref-type контейнер для передачи photoId в onDeletePhoto.
+/// Обходит баг Swift ARM64 ABI: при вызове @escaping async замыкания с (String, Int, Int)
+/// String занимает 2 регистра, и оба Int-аргумента смещаются в регистры async-контекста.
+/// Решение: gallery записывает photoId в этот объект синхронно ДО await, closure читает из него.
+final class GalleryDeleteRequest {
+    var photoId: Int = 0
+}
+
 // MARK: - Галерея с пролистыванием (пост / альбом)
 
 /// Несколько фото на весь экран: PageView, панель по тапу (лайк, комментарии, 3 точки), закрытие — кнопка или свайп вниз.
@@ -209,6 +219,8 @@ struct FullScreenPhotoGalleryView: View {
     var repostObject: String? = nil
     /// После успешного wall.repost вызывается с новым reposts_count (чтобы обновить счётчик в ленте).
     var onRepostSuccess: ((Int) -> Void)? = nil
+    /// Shared-объект для передачи photoId в onDeletePhoto в обход ABI-бага. nil = не используется.
+    var galleryDeleteRequest: GalleryDeleteRequest? = nil
 
     @State private var currentIndex: Int
     @State private var overlayVisible = false
@@ -225,9 +237,13 @@ struct FullScreenPhotoGalleryView: View {
     @State private var presentedPhotoComments: PhotoCommentsContext? = nil
     /// Показать панель действий (вместо Menu — избегаем _UIReparentingView в fullScreenCover).
     @State private var showActionsOverlay = false
+    /// Для своих фото используем нативный confirmationDialog, чтобы не ловить проблемы hit-testing в custom overlay.
+    @State private var showOwnPhotoActionsDialog = false
     /// Токен, захваченный при открытии панели «три точки» — чтобы в fullScreenCover не терять.
     @State private var capturedTokenForSave: String = ""
     @State private var deletePhotoInProgress = false
+    @State private var showDeleteActionErrorToast = false
+    @State private var deleteActionErrorText: String = ""
     @State private var makeProfilePhotoInProgress = false
     @State private var showMakeProfileSuccessToast = false
     @State private var showMakeProfileErrorToast = false
@@ -268,7 +284,8 @@ struct FullScreenPhotoGalleryView: View {
         isProfileAlbum: Bool = false,
         onMakeProfilePhoto: ((String, Int, Int) async -> (Bool, String?))? = nil,
         repostObject: String? = nil,
-        onRepostSuccess: ((Int) -> Void)? = nil
+        onRepostSuccess: ((Int) -> Void)? = nil,
+        galleryDeleteRequest: GalleryDeleteRequest? = nil
     ) {
         self.urls = urls
         self.initialIndex = min(max(0, initialIndex), max(0, urls.count - 1))
@@ -293,6 +310,7 @@ struct FullScreenPhotoGalleryView: View {
         self.onMakeProfilePhoto = onMakeProfilePhoto
         self.repostObject = repostObject
         self.onRepostSuccess = onRepostSuccess
+        self.galleryDeleteRequest = galleryDeleteRequest
         _currentIndex = State(initialValue: min(max(0, initialIndex), max(0, urls.count - 1)))
         _capturedTokenForSave = State(initialValue: initialAccessToken)
     }
@@ -381,38 +399,10 @@ struct FullScreenPhotoGalleryView: View {
                     VStack(spacing: 0) {
                         if isOwnPhotos, isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
                             Button {
-                                let item = ids[currentIndex]
-                                // Всегда брать актуальный токен в момент нажатия (в fullScreenCover старый capture может быть пустым).
-                                let token = getAccessToken?() ?? authService?.accessToken ?? capturedTokenForSave
-                                guard !token.isEmpty, !makeProfilePhotoInProgress else {
-                                    showActionsOverlay = false
-                                    if token.isEmpty {
-                                        makeProfileErrorText = "Войдите в аккаунт снова"
-                                        showMakeProfileErrorToast = true
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { showMakeProfileErrorToast = false }
-                                    }
-                                    return
-                                }
-                                makeProfilePhotoInProgress = true
-                                Task {
-                                    let (ok, errorMessage) = await makeProfile(token, item.ownerId, item.photoId)
-                                    await MainActor.run {
-                                        makeProfilePhotoInProgress = false
-                                        showActionsOverlay = false
-                                        if ok {
-                                            showMakeProfileSuccessToast = true
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                                showMakeProfileSuccessToast = false
-                                            }
-                                        } else {
-                                            makeProfileErrorText = errorMessage ?? "Не удалось установить фото профиля"
-                                            showMakeProfileErrorToast = true
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                                showMakeProfileErrorToast = false
-                                            }
-                                        }
-                                    }
-                                }
+                                performMakeProfilePhoto(
+                                    makeProfile: makeProfile,
+                                    ids: ids
+                                )
                             } label: {
                                 Label(makeProfilePhotoInProgress ? "Сохранение…" : "Сделать фото профиля", systemImage: "person.crop.circle")
                                     .frame(maxWidth: .infinity)
@@ -425,23 +415,13 @@ struct FullScreenPhotoGalleryView: View {
                         }
                         if isOwnPhotos, let deletePhoto = onDeletePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
                             Button {
-                                let item = ids[currentIndex]
-                                let token = capturedTokenForSave.isEmpty ? (getAccessToken?() ?? authService?.accessToken ?? "") : capturedTokenForSave
-                                guard !token.isEmpty, !deletePhotoInProgress else { showActionsOverlay = false; return }
-                                deletePhotoInProgress = true
-                                Task {
-                                    let ok = await deletePhoto(token, item.ownerId, item.photoId)
-                                    await MainActor.run {
-                                        deletePhotoInProgress = false
-                                        showActionsOverlay = false
-                                        if ok { onDismiss() }
-                                    }
-                                }
+                                performDeleteCurrentPhoto(deletePhoto: deletePhoto, ids: ids)
                             } label: {
                                 Label(deletePhotoInProgress ? "Удаление…" : "Удалить", systemImage: "trash")
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 14)
                                     .foregroundStyle(.red)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .disabled(deletePhotoInProgress)
@@ -609,6 +589,20 @@ struct FullScreenPhotoGalleryView: View {
                     .allowsHitTesting(false)
                     .zIndex(2)
                 }
+                if showDeleteActionErrorToast {
+                    VStack {
+                        Spacer(minLength: 0)
+                        Text(deleteActionErrorText)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.bottom, 120)
+                    }
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+                }
                 if showSaveToDeviceToast {
                     VStack {
                         Spacer(minLength: 0)
@@ -688,6 +682,36 @@ struct FullScreenPhotoGalleryView: View {
                 ShareSheet(activityItems: [u])
             }
         }
+        .confirmationDialog("", isPresented: $showOwnPhotoActionsDialog, titleVisibility: .hidden) {
+            if isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
+                Button(makeProfilePhotoInProgress ? "Сохранение…" : "Сделать фото профиля") {
+                    performMakeProfilePhoto(makeProfile: makeProfile, ids: ids)
+                }
+                .disabled(makeProfilePhotoInProgress)
+            }
+            if let deletePhoto = onDeletePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
+                Button(deletePhotoInProgress ? "Удаление…" : "Удалить", role: .destructive) {
+                    performDeleteCurrentPhoto(deletePhoto: deletePhoto, ids: ids)
+                }
+                .disabled(deletePhotoInProgress)
+            }
+            Button(saveToDeviceInProgress ? "Сохранение…" : "Скачать на устройство") {
+                saveCurrentPhotoToDevice()
+            }
+            .disabled(saveToDeviceInProgress)
+            Button(shareInProgress ? "Загрузка…" : "Отправить в …") {
+                shareCurrentPhoto()
+            }
+            .disabled(shareInProgress)
+            Button("Отмена", role: .cancel) { }
+        }
+        .onChange(of: showOwnPhotoActionsDialog) { _, newValue in
+            let idsCount = photoIdsForSaving?.count ?? 0
+            AppLogger.shared.info(
+                "Gallery",
+                "own actions dialog changed visible=\(newValue) currentIndex=\(currentIndex) idsCount=\(idsCount) hasDelete=\(onDeletePhoto != nil)"
+            )
+        }
     }
 
     /// Репост поста на свою стену (wall.repost). Вызывается из нижней панели при repostObject != nil.
@@ -735,10 +759,14 @@ struct FullScreenPhotoGalleryView: View {
             Spacer(minLength: 0)
             if !isSavedAlbum || (isOwnPhotos && (onDeletePhoto != nil || onMakeProfilePhoto != nil)) {
             Button {
-                if capturedTokenForSave.isEmpty {
-                    capturedTokenForSave = getAccessToken?() ?? authService?.accessToken ?? ""
+                let token = resolveActionToken()
+                if !token.isEmpty { capturedTokenForSave = token }
+                AppLogger.shared.info("Gallery", "actions opened tokenEmpty=\(token.isEmpty) ownPhotos=\(isOwnPhotos)")
+                if isOwnPhotos {
+                    showOwnPhotoActionsDialog = true
+                } else {
+                    showActionsOverlay = true
                 }
-                showActionsOverlay = true
             } label: {
                 Image(systemName: "ellipsis.circle.fill")
                     .font(.system(size: 36))
@@ -753,6 +781,117 @@ struct FullScreenPhotoGalleryView: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    private func resolveActionToken(preferCaptured: Bool = false) -> String {
+        let liveToken = getAccessToken?() ?? authService?.accessToken ?? ""
+        if preferCaptured {
+            if !capturedTokenForSave.isEmpty { return capturedTokenForSave }
+            if !liveToken.isEmpty { return liveToken }
+            return initialAccessToken
+        }
+        if !liveToken.isEmpty { return liveToken }
+        if !capturedTokenForSave.isEmpty { return capturedTokenForSave }
+        return initialAccessToken
+    }
+
+    private func presentDeleteActionError(_ text: String) {
+        deleteActionErrorText = text
+        showDeleteActionErrorToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            showDeleteActionErrorToast = false
+        }
+    }
+
+    private func performDeleteCurrentPhoto(
+        deletePhoto: @escaping (String, Int, Int) async -> Bool,
+        ids: [PhotoSaveId]
+    ) {
+        AppLogger.shared.info(
+            "Gallery",
+            "performDeleteCurrentPhoto invoked currentIndex=\(currentIndex) idsCount=\(ids.count) overlayVisible=\(overlayVisible)"
+        )
+        guard currentIndex < ids.count else {
+            AppLogger.shared.error("Gallery", "delete aborted: currentIndex out of bounds currentIndex=\(currentIndex) idsCount=\(ids.count)")
+            presentDeleteActionError("Не удалось определить текущее фото")
+            return
+        }
+        let item = ids[currentIndex]
+        // Явно извлекаем Int-значения ДО Task — обход бага Swift ABI при передаче Int
+        // через @escaping async-замыкание: значения повреждаются если обращаться к item
+        // внутри await-выражения.
+        let photoIdToDelete: Int = item.photoId
+        let ownerIdToDelete: Int = item.ownerId
+        let token = resolveActionToken(preferCaptured: true)
+        AppLogger.shared.info(
+            "Gallery",
+            "delete action tapped photoId=\(photoIdToDelete) ownerId=\(ownerIdToDelete) tokenEmpty=\(token.isEmpty) inProgress=\(deletePhotoInProgress)"
+        )
+        guard !token.isEmpty else {
+            presentDeleteActionError("Войдите в аккаунт снова")
+            return
+        }
+        guard !deletePhotoInProgress else { return }
+        deletePhotoInProgress = true
+        showActionsOverlay = false
+        showOwnPhotoActionsDialog = false
+        // Передаём photoId через shared object до await — обход ABI-бага Swift на ARM64.
+        galleryDeleteRequest?.photoId = photoIdToDelete
+        Task {
+            AppLogger.shared.info("Gallery", "delete action started photoId=\(photoIdToDelete)")
+            // Вторые и третьи Int-аргументы игнорируются в onDelete-замыкании AlbumPhotosView
+            // (замыкание читает photoId из galleryDeleteRequest). Для совместимости с другими
+            // вызывающими (PostCellView и т.д.) передаём реальные значения — там замыкание
+            // по-прежнему использует параметр.
+            let ok = await deletePhoto(token, ownerIdToDelete, photoIdToDelete)
+            await MainActor.run {
+                deletePhotoInProgress = false
+                // Всегда закрываем галерею: при ok=true – успех, при ok=false – ошибка уже
+                // показана тостом внутри галереи через deletePhotoFromAlbum, и мы уходим
+                // чтобы не оставлять пользователя в залипшем состоянии.
+                onDismiss()
+            }
+        }
+    }
+
+    private func performMakeProfilePhoto(
+        makeProfile: @escaping (String, Int, Int) async -> (Bool, String?),
+        ids: [PhotoSaveId]
+    ) {
+        guard currentIndex < ids.count else { return }
+        let item = ids[currentIndex]
+        let token = resolveActionToken()
+        guard !token.isEmpty, !makeProfilePhotoInProgress else {
+            showActionsOverlay = false
+            showOwnPhotoActionsDialog = false
+            if token.isEmpty {
+                makeProfileErrorText = "Войдите в аккаунт снова"
+                showMakeProfileErrorToast = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { showMakeProfileErrorToast = false }
+            }
+            return
+        }
+        makeProfilePhotoInProgress = true
+        showActionsOverlay = false
+        showOwnPhotoActionsDialog = false
+        Task {
+            let (ok, errorMessage) = await makeProfile(token, item.ownerId, item.photoId)
+            await MainActor.run {
+                makeProfilePhotoInProgress = false
+                if ok {
+                    showMakeProfileSuccessToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        showMakeProfileSuccessToast = false
+                    }
+                } else {
+                    makeProfileErrorText = errorMessage ?? "Не удалось установить фото профиля"
+                    showMakeProfileErrorToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        showMakeProfileErrorToast = false
+                    }
+                }
+            }
+        }
     }
 
     /// Иконка и счётчик под ней (для лайков, комментов, репостов в нижней панели).

@@ -388,7 +388,8 @@ struct ProfilePhotoTabView: View {
                 ownerId: dest.ownerId,
                 albumId: dest.albumId,
                 albumTitle: dest.title,
-                isOwnProfile: dest.isOwnProfile
+                isOwnProfile: dest.isOwnProfile,
+                onAlbumListChanged: onRefresh
             )
         }
     }

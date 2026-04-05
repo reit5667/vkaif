@@ -15,6 +15,8 @@ struct AlbumPhotosView: View {
     let albumTitle: String
     /// true = альбом своего профиля (в альбоме «Фото профиля» показывать «Сделать фото профиля»).
     var isOwnProfile: Bool = false
+    /// Обновить список альбомов после мутации фото, чтобы size в родительском экране не устаревал.
+    var onAlbumListChanged: (() async -> Void)? = nil
 
     @State private var photos: [VKPhoto] = []
     @State private var totalCount: Int = 0
@@ -28,6 +30,14 @@ struct AlbumPhotosView: View {
     @State private var photoLikeOverrides: [Int: Int] = [:]
     @State private var photoLikedOverrides: [Int: Bool] = [:]
     @State private var photoLikeInProgress: Set<Int> = []
+    @State private var deleteErrorMessage: String? = nil
+    @State private var showDeleteError = false
+    @State private var shouldShowDeleteErrorAfterDismiss = false
+    @State private var pendingDeletedPhotoId: Int? = nil
+    @State private var shouldReloadAfterDismiss = false
+    @State private var shouldRefreshAlbumListAfterDismiss = false
+    /// Shared-объект для передачи photoId в onDeletePhoto. Живёт всё время жизни AlbumPhotosView.
+    @State private var galleryDeleteRequest = GalleryDeleteRequest()
 
     private let vkApi = VKApiService()
     private let pageSize = 50
@@ -53,20 +63,35 @@ struct AlbumPhotosView: View {
         }
     }
 
-    /// Удаление фото из альбома (photos.delete). При успехе — убираем фото из списка и закрываем галерею (локальное обновление, без рефетча).
+    /// Удаление фото из альбома (photos.delete).
+    /// Во время открытого fullscreen не трогаем список/стейт экрана, только помечаем pending-удаление.
+    /// Локальное удаление + reload + refresh списка альбомов выполняем уже в onDismiss галереи (handleGalleryDismiss).
+    /// Ошибка: сохраняем сообщение — alert покажется после dismiss через handleGalleryDismiss.
     private func deletePhotoFromAlbum(token: String, ownerId: Int, photoId: Int) async -> Bool {
         let t = token.isEmpty ? (authService.accessToken ?? "") : token
+        AppLogger.shared.info(
+            "Gallery",
+            "deletePhotoFromAlbum invoked ownerId=\(ownerId) photoId=\(photoId) tokenEmpty=\(t.isEmpty) photosCount=\(photos.count) totalCount=\(totalCount)"
+        )
         guard !t.isEmpty else { return false }
         do {
             try await vkApi.photosDelete(token: t, ownerId: ownerId, photoId: photoId)
+            AppLogger.shared.info("Gallery", "deletePhotoFromAlbum success photoId=\(photoId)")
             await MainActor.run {
-                photos.removeAll { $0.id == photoId }
-                if totalCount > 0 { totalCount -= 1 }
-                fullScreenPhotoItem = nil
+                pendingDeletedPhotoId = photoId
+                shouldReloadAfterDismiss = true
+                shouldRefreshAlbumListAfterDismiss = true
             }
             return true
         } catch {
-            AppLogger.shared.error("Gallery", "deletePhotoFromAlbum failed", error: error)
+            AppLogger.shared.error("Gallery", "deletePhotoFromAlbum failed ownerId=\(ownerId) photoId=\(photoId)", error: error)
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            // Галерея закроется в любом случае (performDeleteCurrentPhoto вызывает onDismiss всегда).
+            // Сохраняем ошибку — alert покажется сразу после dismiss (handleGalleryDismiss → showDeleteError).
+            await MainActor.run {
+                deleteErrorMessage = msg
+                shouldShowDeleteErrorAfterDismiss = true
+            }
             return false
         }
     }
@@ -112,6 +137,7 @@ struct AlbumPhotosView: View {
                         }
                         .padding(4)
                     }
+                    .refreshable { reloadWithNewSort() }
                 }
             case .failed(let error):
                 ContentUnavailableView(
@@ -147,20 +173,30 @@ struct AlbumPhotosView: View {
         .onAppear {
             if loadState == .idle { loadPhotos(offset: 0, append: false) }
         }
+        .alert("Не удалось удалить фото", isPresented: $showDeleteError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(deleteErrorMessage ?? "Неизвестная ошибка")
+        }
     }
 
     @ViewBuilder
     private func fullScreenGalleryContent(item: AlbumFullScreenItem) -> some View {
-        let urls = photos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+        // Фильтруем только фото с валидным URL — urls и photosWithURL синхронны по индексу.
+        let photosWithURL = photos.filter { $0.displayURL.flatMap { URL(string: $0) } != nil }
+        let urls = photosWithURL.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
         if !urls.isEmpty {
-            albumGalleryView(urls: urls, item: item)
+            // item.index — индекс в исходном photos[]; ищем ближайший индекс в photosWithURL.
+            let targetPhotoId = photos.indices.contains(item.index) ? photos[item.index].id : nil
+            let galleryIndex = targetPhotoId.flatMap { id in photosWithURL.firstIndex(where: { $0.id == id }) } ?? 0
+            albumGalleryView(urls: urls, photosWithURL: photosWithURL, galleryIndex: galleryIndex)
         }
     }
 
-    private func albumGalleryView(urls: [URL], item: AlbumFullScreenItem) -> FullScreenPhotoGalleryView {
-        let idx = min(item.index, photos.count - 1)
-        let photo = photos.indices.contains(idx) ? photos[idx] : nil
-        let onDismiss: () -> Void = { fullScreenPhotoItem = nil }
+    private func albumGalleryView(urls: [URL], photosWithURL: [VKPhoto], galleryIndex: Int) -> FullScreenPhotoGalleryView {
+        let idx = min(galleryIndex, photosWithURL.count - 1)
+        let photo = photosWithURL.indices.contains(idx) ? photosWithURL[idx] : nil
+        let onDismiss: () -> Void = { handleGalleryDismiss() }
         let likesCount: Int = photo.map { photoLikeOverrides[$0.id] ?? $0.likes?.count ?? 0 } ?? 0
         let commentsCount: Int = photo.map { $0.comments?.count ?? 0 } ?? 0
         let isLiked: Bool = photo.map { photoLikedOverrides[$0.id] ?? ($0.likes?.userLikes == 1) } ?? false
@@ -171,13 +207,19 @@ struct AlbumPhotosView: View {
         let getAccessToken: () -> String = { authService.accessToken ?? "" }
         var onDelete: ((String, Int, Int) async -> Bool)? = nil
         if isOwnProfile {
-            // Всегда используем ownerId альбома при вызове API — owner_id из фото в ответе VK иногда приходит некорректно (вне Int32).
-            onDelete = { token, _, pid in await deletePhotoFromAlbum(token: token, ownerId: ownerId, photoId: pid) }
+            // Читаем photoId из galleryDeleteRequest (обход ABI-бага Swift ARM64).
+            // Gallery устанавливает galleryDeleteRequest.photoId синхронно до вызова этого замыкания.
+            let dr = galleryDeleteRequest
+            onDelete = { token, _, _ in
+                AppLogger.shared.info("Gallery", "onDelete via deleteRequest photoId=\(dr.photoId)")
+                return await deletePhotoFromAlbum(token: token, ownerId: ownerId, photoId: dr.photoId)
+            }
         }
-        let photoIds: [PhotoSaveId] = photos.map { PhotoSaveId(ownerId: $0.ownerId ?? ownerId, photoId: $0.id, accessKey: $0.accessKey) }
+        // photoIds синхронен с urls по индексу (оба построены из photosWithURL).
+        let photoIds: [PhotoSaveId] = photosWithURL.map { PhotoSaveId(ownerId: ownerId, photoId: $0.id, accessKey: $0.accessKey) }
         return FullScreenPhotoGalleryView(
             urls: urls,
-            initialIndex: min(item.index, urls.count - 1),
+            initialIndex: min(galleryIndex, urls.count - 1),
             onDismiss: onDismiss,
             likesCount: likesCount,
             commentsCount: commentsCount,
@@ -193,8 +235,39 @@ struct AlbumPhotosView: View {
             isOwnPhotos: isOwnProfile,
             onDeletePhoto: onDelete,
             isProfileAlbum: (albumId == -6),
-            onMakeProfilePhoto: makeProfilePhotoAction
+            onMakeProfilePhoto: makeProfilePhotoAction,
+            galleryDeleteRequest: galleryDeleteRequest
         )
+    }
+
+    private func handleGalleryDismiss() {
+        fullScreenPhotoItem = nil
+        applyPendingDeletionIfNeeded()
+        if shouldReloadAfterDismiss {
+            shouldReloadAfterDismiss = false
+            loadPhotos(offset: 0, append: false, preserveVisibleContent: true)
+        }
+        if shouldRefreshAlbumListAfterDismiss {
+            shouldRefreshAlbumListAfterDismiss = false
+            if let onAlbumListChanged {
+                Task { await onAlbumListChanged() }
+            }
+        }
+        if shouldShowDeleteErrorAfterDismiss {
+            shouldShowDeleteErrorAfterDismiss = false
+            showDeleteError = true
+        }
+    }
+
+    private func applyPendingDeletionIfNeeded() {
+        guard let pendingDeletedPhotoId else { return }
+        let beforeCount = photos.count
+        photos.removeAll { $0.id == pendingDeletedPhotoId }
+        let removedCount = beforeCount - photos.count
+        if removedCount > 0 {
+            totalCount = max(0, totalCount - removedCount)
+        }
+        self.pendingDeletedPhotoId = nil
     }
 
     private func photoCell(_ photo: VKPhoto, index: Int) -> some View {
@@ -229,11 +302,11 @@ struct AlbumPhotosView: View {
         }
     }
 
-    private func loadPhotos(offset: Int, append: Bool) {
+    private func loadPhotos(offset: Int, append: Bool, preserveVisibleContent: Bool = false) {
         guard let token = authService.accessToken else { return }
         if append {
             loadMoreState = .loading
-        } else {
+        } else if !preserveVisibleContent || photos.isEmpty {
             loadState = .loading
         }
         Task {
@@ -246,6 +319,10 @@ struct AlbumPhotosView: View {
                     offset: offset,
                     rev: rev
                 )
+                // Диагностика для альбома «Сохранённые» (-15): логируем id/owner_id первых фото
+                if albumId == -15, let first = response.items.first {
+                    AppLogger.shared.info("AlbumDebug", "album=-15 totalCount=\(response.count) first.id=\(first.id) first.ownerId=\(String(describing: first.ownerId)) albumOwnerId=\(ownerId)")
+                }
                 await MainActor.run {
                     if append {
                         photos.append(contentsOf: response.items)
@@ -265,7 +342,7 @@ struct AlbumPhotosView: View {
             } catch {
                 await MainActor.run {
                     if append { loadMoreState = .failed(error) }
-                    else { loadState = .failed(error) }
+                    else if !preserveVisibleContent || photos.isEmpty { loadState = .failed(error) }
                 }
             }
         }

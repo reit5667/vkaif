@@ -541,20 +541,48 @@ final class VKApiService: Sendable {
         photoId: Int
     ) async throws {
         guard !token.isEmpty else { throw VKApiError.missingToken }
-        var queryItems: [URLQueryItem] = [
+        let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "owner_id", value: String(ownerId)),
             URLQueryItem(name: "photo_id", value: String(photoId))
         ]
-        guard var components = URLComponents(string: "\(baseURL)/photos.delete") else { throw VKApiError.invalidURL }
-        components.queryItems = queryItems
-        guard let url = components.url else { throw VKApiError.invalidURL }
+        // POST: VK требует POST для деструктивных методов; при GET возвращает 1 но не удаляет (особенно для photo_id > Int32.max)
+        guard let url = URL(string: "\(baseURL)/photos.delete") else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        logger?.info("VKApi", "photos.delete ownerId=\(ownerId) photoId=\(photoId)")
-        let _: Int = try await requestVK(Int.self, from: request)
-        logger?.info("VKApi", "photos.delete ok")
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = queryItems.compactMap { item -> String? in
+            guard let val = item.value else { return nil }
+            let encVal = val.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? val
+            return "\(item.name)=\(encVal)"
+        }.joined(separator: "&")
+        request.httpBody = body.data(using: .utf8)
+        logger?.info("VKApi", "photos.delete POST ownerId=\(ownerId) photoId=\(photoId)")
+        let (data, response) = try await network.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            logger?.error("VKApi", "photos.delete invalid response (not HTTPURLResponse)")
+            throw NetworkError.invalidResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            let preview = String(data: data, encoding: .utf8).map { $0.count > 500 ? String($0.prefix(500)) + "…" : $0 } ?? "nil"
+            logger?.error("VKApi", "photos.delete HTTP \(http.statusCode): \(preview)")
+            throw NetworkError.httpStatus(http.statusCode, data)
+        }
+        if let errWrapper = try? decoder.decode(VKErrorWrapper.self, from: data) {
+            let msg = errWrapper.error.errorMsg ?? "Ошибка VK \(errWrapper.error.errorCode)"
+            logger?.error("VKApi", "photos.delete API error \(errWrapper.error.errorCode): \(msg)")
+            throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
+        }
+        do {
+            let wrapper = try decoder.decode(VKResponse<Int>.self, from: data)
+            let preview = String(data: data, encoding: .utf8).map { $0.count > 200 ? String($0.prefix(200)) + "…" : $0 } ?? "nil"
+            logger?.info("VKApi", "photos.delete ok response=\(wrapper.response) raw=\(preview)")
+        } catch {
+            let preview = String(data: data, encoding: .utf8).map { $0.count > 500 ? String($0.prefix(500)) + "…" : $0 } ?? "nil"
+            logger?.error("VKApi", "photos.delete decode failed raw=\(preview)", error: error)
+            throw error
+        }
     }
 
     // MARK: - photos.makeCover
