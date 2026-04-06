@@ -173,12 +173,32 @@ struct VideoPlayerView: View {
 }
 
 /// Скрипт скрывает блоки рекомендаций (карточки «Эпизод», «следующее видео»). Не трогает элементы, содержащие video — иначе при паузе/конце получается черный экран.
+/// MutationObserver следит за изменениями DOM и скрывает рекомендации как только они появляются (в том числе после окончания видео).
+/// Дополнительно инжектирует CSS для скрытия VK-классов end-screen через таблицу стилей (надёжнее, чем inline style).
 private let hideOverlaysScript = """
 (function() {
+    // CSS-инъекция: скрываем известные VK-классы end-screen/рекомендаций через <style>
+    function injectCSS() {
+        if (document.getElementById('cfvk-hide')) return;
+        var s = document.createElement('style');
+        s.id = 'cfvk-hide';
+        s.textContent = [
+            '[class*="vp_series"]','[class*="series_ep"]','[class*="ep_switch"]',
+            '[class*="next_video"]','[class*="nextVideo"]','[class*="next-video"]',
+            '[class*="rec_video"]','[class*="recVideo"]',
+            '[class*="end_screen"]','[class*="endScreen"]','[class*="endscreen"]',
+            '[class*="related_video"]','[class*="relatedVideo"]',
+            '[class*="autoplay_next"]','[class*="autoplayNext"]',
+            '.mv_rel_video_wrap','.videoplayer_end','.vp_end','.vp_overlay_end'
+        ].join(',') + '{ display:none!important; }';
+        (document.head || document.documentElement).appendChild(s);
+    }
+    injectCSS();
     var sel = '[class*="recommend"],[class*="Recommend"],[id*="recommend"],[class*="related"],[class*="Related"],[class*="suggest"],[class*="next-video"],[class*="NextVideo"],[class*="autoplay"],[class*="Autoplay"],[data-class*="recommend"],[data-class*="related"]';
-    var hideKeywords = ['следующ','начнётся через','next video','эпизод','история вселенной','история и геймдизайн','полная версия'];
+    var hideKeywords = ['следующ','начнётся через','next video','стало известно','смотрите также','похожие видео','вам может понравиться','эпизод','история вселенной','история и геймдизайн','полная версия'];
     function containsVideo(el) { return el && (el.tagName === 'VIDEO' || (el.querySelector && el.querySelector('video'))); }
     function hide() {
+        injectCSS();
         document.querySelectorAll(sel).forEach(function(el) {
             if (!containsVideo(el)) el.style.setProperty('display', 'none', 'important');
         });
@@ -193,6 +213,18 @@ private let hideOverlaysScript = """
     hide();
     setTimeout(hide, 1500);
     setTimeout(hide, 3000);
+    if (typeof MutationObserver !== 'undefined') {
+        var observer = new MutationObserver(function(mutations) {
+            var hasNew = false;
+            mutations.forEach(function(m) { if (m.addedNodes.length > 0) hasNew = true; });
+            if (hasNew) hide();
+        });
+        var root = document.body || document.documentElement;
+        if (root) observer.observe(root, { childList: true, subtree: true });
+        else document.addEventListener('DOMContentLoaded', function() {
+            observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+        });
+    }
 })();
 """
 
@@ -219,8 +251,11 @@ private let keepVideoVisibleScript = """
 
 /// Единый скрипт для всех фреймов (в т.ч. iframe плеера VK): детект ended/pause, postMessage в main frame, приём requestPlay для воспроизведения.
 /// Инжектируется как user script с forMainFrameOnly: false, чтобы срабатывал и внутри iframe с видео.
+/// ВАЖНО: запоминаем ПЕРВЫЙ найденный video-элемент (originalVideo) и не переключаемся на превью рекомендаций,
+/// которые VK добавляет в DOM после окончания основного видео.
 private let videoBridgeScript = """
 (function() {
+    var originalVideo = null;
     function postEnded() {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoEnded)
             window.webkit.messageHandlers.videoEnded.postMessage('ended');
@@ -239,16 +274,17 @@ private let videoBridgeScript = """
         if (e.data && e.data.type === 'videoPaused' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoPaused)
             window.webkit.messageHandlers.videoPaused.postMessage('paused');
         if (e.data && e.data.type === 'requestPlay') {
-            var v = document.querySelector('video');
+            var v = originalVideo || document.querySelector('video');
             if (v) v.play();
         }
         if (e.data && e.data.type === 'requestPause') {
-            var v = document.querySelector('video');
+            var v = originalVideo || document.querySelector('video');
             if (v) v.pause();
         }
     });
     function setupVideo(v) {
         if (!v || v.dataset.videoBridge) return;
+        if (!originalVideo) originalVideo = v;
         v.dataset.videoBridge = '1';
         v.addEventListener('ended', postEnded);
         v.addEventListener('pause', postPaused);
@@ -261,7 +297,7 @@ private let videoBridgeScript = """
     else setup();
     [500, 1000, 2000, 4000].forEach(function(ms) { setTimeout(setup, ms); });
     setInterval(function() {
-        var v = document.querySelector('video');
+        var v = originalVideo || document.querySelector('video');
         if (v && v.ended && !v.dataset.reportedEnd) { v.dataset.reportedEnd = '1'; postEnded(); }
     }, 500);
 })();
@@ -367,6 +403,18 @@ private struct VideoWebView: UIViewRepresentable {
                 webView?.evaluateJavaScript(videoRequestPauseScript, completionHandler: nil)
             }
         }
+        if videoEnded != coord.lastVideoEnded {
+            coord.lastVideoEnded = videoEnded
+            if videoEnded {
+                // Видео закончилось: прогоняем скрипт скрытия рекомендаций несколько раз,
+                // пока VK динамически добавляет блоки в DOM.
+                [0.0, 0.4, 1.0, 2.0].forEach { delay in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak webView] in
+                        webView?.evaluateJavaScript(hideOverlaysScript, completionHandler: nil)
+                    }
+                }
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -375,6 +423,7 @@ private struct VideoWebView: UIViewRepresentable {
         var lastReplayTrigger: Int = 0
         var lastPlayRequestTrigger: Int = 0
         var lastPauseRequestTrigger: Int = 0
+        var lastVideoEnded: Bool = false
         var videoEndedBinding: Binding<Bool>?
         var videoPausedBinding: Binding<Bool>?
 

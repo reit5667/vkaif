@@ -130,7 +130,7 @@ struct FullScreenImageView: View {
                     guard scale <= 1 else { return }
                     let dy = value.translation.height
                     let dx = value.translation.width
-                    if dy > 120 && dy > abs(dx) {
+                    if abs(dy) > 120 && abs(dy) > abs(dx) {
                         onSwipeDown?()
                     }
                 }

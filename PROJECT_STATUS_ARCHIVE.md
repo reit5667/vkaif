@@ -4,6 +4,16 @@
 
 ---
 
+## Трек 2026-04-06
+
+- **TASK-025:** фото из карточки репоста в ленте открываются в fullscreen-галерее. Добавлен отдельный `@State repostFullScreenPhotoIndex`, второй `.fullScreenCover` и `repostFullScreenGalleryContent` в PostCellView; в `repostBlock` — `.onTapGesture` на каждую ячейку.
+- **TASK-026:** шрифт кнопок «Показать ещё» / «Свернуть» увеличен с `.caption` до `.subheadline`.
+- **TASK-028:** свайп снизу-вверх тоже закрывает fullscreen-галерею. В `FullScreenImageView` условие изменено: `dy > 120` → `abs(dy) > 120 && abs(dy) > abs(dx)`.
+- **TASK-029:** хитбокс «Показать ещё» конфликтовал с фото-сеткой. Добавлены `.padding(.vertical, 4)`, `.frame(maxWidth: .infinity, alignment: .leading)` и `.contentShape(Rectangle())` — кнопка занимает всю ширину поста.
+- **TASK-030:** ссылки в постах открывались в приложении VK. Добавлена `SafariView` (UIViewControllerRepresentable для SFSafariViewController); `UIApplication.shared.open(url)` заменён на `safariURL = url` + `.sheet` в body.
+- **TASK-007:** убрать рекомендации VK после видео — решили не реализовывать, пусть VK показывает своё поведение.
+- Добавлены в бэклог: TASK-028–033 (новые задачи из сессии). Backlog.md переведён в формат маркированного списка с `[x]`/`[ ]`/`[-]`.
+
 ## Трек 2026-04-05 (продолжение)
 
 - **TASK-005:** убран `JustifiedTextView` (UIViewRepresentable + UITextView). Заменён на нативный SwiftUI `Text` с `.multilineTextAlignment(.leading)` — растянутые слова и межбуквенный интервал исчезли.

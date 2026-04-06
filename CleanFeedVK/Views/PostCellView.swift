@@ -1,5 +1,15 @@
 import SwiftUI
+import SafariServices
 
+// MARK: - Встроенный браузер (SFSafariViewController)
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
 
 // MARK: - Переопределение опроса после голосования (оптимистичное отображение)
 
@@ -82,8 +92,12 @@ struct PostCellView: View {
     @Environment(\.makeProfilePhotoForGallery) private var makeProfilePhotoFromEnvironment
     @State private var isTextExpanded = false
     @State private var fullScreenPhotoIndex: Int? = nil
+    /// Индекс фото из репоста для fullscreen-галереи (отдельный state — открывается своим fullScreenCover).
+    @State private var repostFullScreenPhotoIndex: Int? = nil
     /// Токен, захваченный при открытии галереи (в fullScreenCover getAccessToken часто пуст — сохраняем при тапе).
     @State private var tokenForGallery: String = ""
+    /// URL для открытия во встроенном браузере (SFSafariViewController).
+    @State private var safariURL: URL? = nil
     private let textLineLimitCollapsed = 3
 
     /// URL фото для превью: приоритет feedPreviewURL (меньше трафика), fallback на displayURL для надёжности.
@@ -149,6 +163,20 @@ struct PostCellView: View {
             )) {
                 fullScreenGalleryContent
             }
+            .fullScreenCover(isPresented: Binding(
+                get: { repostFullScreenPhotoIndex != nil },
+                set: { if !$0 { repostFullScreenPhotoIndex = nil } }
+            )) {
+                repostFullScreenGalleryContent
+            }
+            .sheet(isPresented: Binding(
+                get: { safariURL != nil },
+                set: { if !$0 { safariURL = nil } }
+            )) {
+                if let url = safariURL {
+                    SafariView(url: url).ignoresSafeArea()
+                }
+            }
     }
 
     private var postBodyContent: some View {
@@ -190,6 +218,23 @@ struct PostCellView: View {
     private var fullScreenGalleryContent: some View {
         if let idx = fullScreenPhotoIndex, !photoDisplayURLsAsURLs.isEmpty {
             AnyView(fullScreenGalleryView(initialIndex: idx))
+        }
+    }
+
+    @ViewBuilder
+    private var repostFullScreenGalleryContent: some View {
+        if let idx = repostFullScreenPhotoIndex,
+           let repost = post.copyHistory?.first {
+            let urls = (repost.attachments ?? [])
+                .compactMap { $0.photo?.displayURL }
+                .compactMap { URL(string: $0) }
+            if !urls.isEmpty {
+                FullScreenPhotoGalleryView(
+                    urls: urls,
+                    initialIndex: min(idx, urls.count - 1),
+                    onDismiss: { repostFullScreenPhotoIndex = nil }
+                )
+            }
         }
     }
 
@@ -339,8 +384,11 @@ struct PostCellView: View {
                         isTextExpanded.toggle()
                     }
                 }
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundColor(.accentColor)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
         }
     }
@@ -478,7 +526,7 @@ struct PostCellView: View {
             ForEach(Array(linkAttachments.enumerated()), id: \.offset) { _, link in
                 if let url = URL(string: link.url) {
                     Button {
-                        UIApplication.shared.open(url)
+                        safariURL = url
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "link")
@@ -642,7 +690,7 @@ struct PostCellView: View {
             if !repostPhotoURLs.isEmpty {
                 let columns = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
                 LazyVGrid(columns: columns, spacing: 4) {
-                    ForEach(Array(repostPhotoURLs.prefix(6).enumerated()), id: \.offset) { _, urlString in
+                    ForEach(Array(repostPhotoURLs.prefix(6).enumerated()), id: \.offset) { index, urlString in
                         if let url = URL(string: urlString) {
                             AsyncImage(url: url) { phase in
                                 switch phase {
@@ -654,6 +702,9 @@ struct PostCellView: View {
                             .frame(height: 80)
                             .clipped()
                             .cornerRadius(4)
+                            .onTapGesture {
+                                repostFullScreenPhotoIndex = index
+                            }
                         }
                     }
                 }
