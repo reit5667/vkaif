@@ -253,7 +253,7 @@ struct VKPost: Decodable {
     let markedAsAds: Int?
     let postType: String?
     let sourceType: String?
-    let attachments: [VKAttachment]?
+    var attachments: [VKAttachment]?
     let copyHistory: [VKPost]?
     /// Счётчик лайков (если вернул API).
     let likes: VKPostLikes?
@@ -316,7 +316,7 @@ struct VKPost: Decodable {
 
 struct VKAttachment: Decodable {
     let type: String
-    let photo: VKPhoto?
+    var photo: VKPhoto?
     let video: VKVideo?
     let link: VKLink?
     let doc: VKDoc?
@@ -443,11 +443,15 @@ struct VKPhoto: Decodable {
     private func urlFromSizes(order: [String]) -> String? {
         guard let sizes = sizes, !sizes.isEmpty else { return nil }
         for type in order {
-            if let url = sizes.first(where: { $0.type?.lowercased() == type })?.url, !url.isEmpty {
-                return url
+            if let raw = sizes.first(where: { $0.type?.lowercased() == type })?.url {
+                let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !url.isEmpty { return url }
             }
         }
-        return sizes.first(where: { $0.url != nil && !($0.url ?? "").isEmpty })?.url
+        if let raw = sizes.first(where: { $0.url != nil && !($0.url ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.url {
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     private var legacyDisplayURL: String? {

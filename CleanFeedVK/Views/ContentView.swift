@@ -45,6 +45,10 @@ struct ContentView: View {
     @State private var pinInProgress: Set<String> = []
     /// Переопределение «закреплён» после wall.pin / wall.unpin (postId -> true/false).
     @State private var postPinnedOverrides: [String: Bool] = [:]
+    /// Время последней успешной загрузки ленты — для авто-обновления только через 10 мин.
+    @State private var lastFeedLoadDate: Date? = nil
+    /// Инкремент при ручном «Обновить» — ScrollViewReader реагирует и прокручивает вверх.
+    @State private var feedScrollToTopTrigger = 0
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -82,7 +86,8 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { _, new in
                 if new == .active, case .authenticated = authService.state {
-                    loadFeed()
+                    let stale = lastFeedLoadDate.map { Date().timeIntervalSince($0) > 600 } ?? true
+                    if stale { loadFeed() }
                 }
             }
         }
@@ -104,8 +109,11 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Обновить") { loadFeed() }
-                    .disabled(feedLoadState.isLoading)
+                Button("Обновить") {
+                    feedScrollToTopTrigger += 1
+                    loadFeed()
+                }
+                .disabled(feedLoadState.isLoading)
             }
             ToolbarItem(placement: .topBarLeading) {
                 Button("Выйти") {
@@ -130,28 +138,34 @@ struct ContentView: View {
     // MARK: - Лента постов (LazyVStack)
 
     private var feedListView: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(feedPosts, id: \.postId) { post in
-                    feedPostRow(post)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    Divider()
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("feedTop")
+                    ForEach(feedPosts, id: \.postId) { post in
+                        feedPostRow(post)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        Divider()
+                    }
 
-                // Триггер подгрузки при достижении конца
-                if nextFrom != nil {
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear { loadMoreFeed() }
-                }
+                    // Триггер подгрузки при достижении конца
+                    if nextFrom != nil {
+                        Color.clear
+                            .frame(height: 1)
+                            .onAppear { loadMoreFeed() }
+                    }
 
-                if isLoadingMore {
-                    ProgressView("Ещё посты…")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                    if isLoadingMore {
+                        ProgressView("Ещё посты…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                    }
                 }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
+            .onChange(of: feedScrollToTopTrigger) { _, _ in
+                withAnimation { proxy.scrollTo("feedTop", anchor: .top) }
+            }
         }
         .navigationDestination(for: FeedDestination.self) { dest in
             switch dest {
@@ -506,14 +520,16 @@ struct ContentView: View {
                    let first = users.first {
                     await MainActor.run { currentUserId = first.id }
                 }
+                let enriched = await enrichPhotoStubs(in: filtered, token: token)
                 await MainActor.run {
-                    feedPosts = filtered
+                    feedPosts = enriched
                     feedProfiles = response.profiles ?? []
                     feedGroups = response.groups ?? []
                     nextFrom = response.nextFrom
-                    feedLoadState = .loaded(count: filtered.count)
+                    feedLoadState = .loaded(count: enriched.count)
+                    lastFeedLoadDate = Date()
                 }
-                printFeedToConsole(posts: filtered, nextFrom: response.nextFrom)
+                printFeedToConsole(posts: enriched, nextFrom: response.nextFrom)
             } catch {
                 await MainActor.run {
                     feedLoadState = .failed(error)
@@ -534,15 +550,16 @@ struct ContentView: View {
             do {
                 let response = try await vkApi.getNewsfeed(token: token, startFrom: from)
                 let filtered = feedFilter.filter(response.items)
+                let enriched = await enrichPhotoStubs(in: filtered, token: token)
                 await MainActor.run {
-                    feedPosts.append(contentsOf: filtered)
+                    feedPosts.append(contentsOf: enriched)
                     mergeProfiles(response.profiles ?? [])
                     mergeGroups(response.groups ?? [])
                     nextFrom = response.nextFrom
                     isLoadingMore = false
                 }
-                if !filtered.isEmpty {
-                    print("[CleanFeedVK] Подгружено ещё \(filtered.count) постов, next_from: \(response.nextFrom ?? "nil")")
+                if !enriched.isEmpty {
+                    print("[CleanFeedVK] Подгружено ещё \(enriched.count) постов, next_from: \(response.nextFrom ?? "nil")")
                 }
             } catch {
                 await MainActor.run {
@@ -682,6 +699,68 @@ struct ContentView: View {
         } catch {
             AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(o) photoId=\(p)", error: error)
             return false
+        }
+    }
+
+    /// Обогащает посты: находит фото-стабы (нет sizes и нет photo_xxx) и подгружает их через photos.getById.
+    /// Максимум 1000 фото за вызов (лимит VK). Если запрос упал — возвращает исходный список без паники.
+    private func enrichPhotoStubs(in posts: [VKPost], token: String) async -> [VKPost] {
+        // Собираем стабы: photo с id+ownerId, но без URL
+        var stubRefs: [(ownerId: Int, photoId: Int, accessKey: String?)] = []
+        for post in posts {
+            for att in (post.attachments ?? []) {
+                guard let photo = att.photo else { continue }
+                guard photo.feedPreviewURL == nil else { continue }
+                let ownerId = photo.ownerId ?? 0
+                guard ownerId != 0 else { continue }
+                stubRefs.append((ownerId: ownerId, photoId: photo.id, accessKey: photo.accessKey))
+            }
+            // Репосты тоже проверяем
+            for repost in (post.copyHistory ?? []) {
+                for att in (repost.attachments ?? []) {
+                    guard let photo = att.photo else { continue }
+                    guard photo.feedPreviewURL == nil else { continue }
+                    let ownerId = photo.ownerId ?? 0
+                    guard ownerId != 0 else { continue }
+                    stubRefs.append((ownerId: ownerId, photoId: photo.id, accessKey: photo.accessKey))
+                }
+            }
+        }
+        guard !stubRefs.isEmpty else { return posts }
+
+        // Дедупликация
+        var seen = Set<String>()
+        stubRefs = stubRefs.filter { ref in
+            let key = "\(ref.ownerId)_\(ref.photoId)"
+            return seen.insert(key).inserted
+        }
+        // Ограничение VK: max 1000 за запрос
+        let batch = Array(stubRefs.prefix(1000))
+        print("[CleanFeedVK] enrichPhotoStubs: stub photos=\(stubRefs.count), fetching \(batch.count)")
+
+        guard let enrichedPhotos = try? await vkApi.photosGetById(token: token, photoRefs: batch) else {
+            return posts
+        }
+        var enrichMap: [String: VKPhoto] = [:]
+        for p in enrichedPhotos {
+            guard let oid = p.ownerId else { continue }
+            enrichMap["\(oid)_\(p.id)"] = p
+        }
+        print("[CleanFeedVK] enrichPhotoStubs: received \(enrichedPhotos.count) photos")
+
+        // Заменяем стабы на полные фото в копиях постов
+        return posts.map { post in
+            var p = post
+            p.attachments = post.attachments?.map { att in
+                var a = att
+                if let photo = att.photo,
+                   photo.feedPreviewURL == nil,
+                   let full = enrichMap["\(photo.ownerId ?? 0)_\(photo.id)"] {
+                    a.photo = full
+                }
+                return a
+            }
+            return p
         }
     }
 

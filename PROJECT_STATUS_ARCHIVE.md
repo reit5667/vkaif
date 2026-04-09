@@ -4,6 +4,11 @@
 
 ---
 
+## Трек 2026-04-09
+
+- **TASK-033:** лента больше не прокручивается в начало при возврате в приложение — позиция скролла сохраняется.
+- **TASK-031:** фото-превью в ленте не загружались из-за стабов в `newsfeed.get` (VK возвращает `id`+`owner_id` без `sizes`). Добавлен `photos.getById` батч-запрос (`enrichPhotoStubs`) после загрузки ленты — стабы заменяются полными объектами. Также: `urlFromSizes` добавлен trimming URL-строк; в `repostBlock` добавлен `else`-ветка для placeholder; `.id(photo.id)` на ячейках альбома.
+
 ## Трек 2026-04-06
 
 - **TASK-025:** фото из карточки репоста в ленте открываются в fullscreen-галерее. Добавлен отдельный `@State repostFullScreenPhotoIndex`, второй `.fullScreenCover` и `repostFullScreenGalleryContent` в PostCellView; в `repostBlock` — `.onTapGesture` на каждую ячейку.

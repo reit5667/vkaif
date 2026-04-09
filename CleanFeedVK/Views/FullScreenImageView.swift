@@ -56,14 +56,24 @@ struct FullScreenImageView: View {
                 .scaleEffect(scale, anchor: zoomAnchor)
                 .offset(x: panOffset.width, y: panOffset.height)
                 .gesture(
-                    MagnificationGesture()
+                    MagnifyGesture()
                         .onChanged { value in
-                            let newScale = lastScale * value
+                            // Устанавливаем anchor только в начале нового pinch (когда zoom = 1).
+                            // Если уже zoomed — не меняем anchor, чтобы изображение не прыгало.
+                            if lastScale <= 1.0 {
+                                zoomAnchor = value.startAnchor
+                            }
+                            let newScale = lastScale * value.magnification
                             scale = min(maxScale, max(minScale, newScale))
                             onScaleChange?(scale)
                         }
                         .onEnded { _ in
                             lastScale = scale
+                            if scale <= 1 {
+                                panOffset = .zero
+                                lastPanOffset = .zero
+                                zoomAnchor = .center
+                            }
                             onScaleChange?(scale)
                         }
                 )

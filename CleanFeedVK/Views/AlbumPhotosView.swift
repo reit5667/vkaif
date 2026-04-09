@@ -118,6 +118,7 @@ struct AlbumPhotosView: View {
                         LazyVGrid(columns: columns, spacing: 4) {
                             ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
                                 photoCell(photo, index: index)
+                                    .id(photo.id)
                             }
                             if canLoadMore {
                                 Color.clear

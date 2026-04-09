@@ -100,16 +100,35 @@ struct PostCellView: View {
     @State private var safariURL: URL? = nil
     private let textLineLimitCollapsed = 3
 
-    /// URL фото для превью: приоритет feedPreviewURL (меньше трафика), fallback на displayURL для надёжности.
-    private var photoThumbnailURLs: [String] {
-        guard let attachments = post.attachments else { return [] }
-        return attachments.compactMap { p in p.photo?.feedPreviewURL ?? p.photo?.displayURL }
+    /// Превью URL + gallery-индекс для каждого photo-вложения.
+    /// thumbnailURL = nil → показываем placeholder. galleryIndex = nil → тап не открывает галерею.
+    private struct PhotoGridItem {
+        let thumbnailURL: String?
+        let galleryIndex: Int?
     }
 
-    /// URL фото для полноэкранного просмотра (крупные размеры).
+    private var photoGridItems: [PhotoGridItem] {
+        guard let attachments = post.attachments else { return [] }
+        var galleryIdx = 0
+        return attachments.compactMap { att -> PhotoGridItem? in
+            guard let photo = att.photo else { return nil }
+            let thumbURL = photo.feedPreviewURL ?? photo.displayURL ?? photo.thumbnailDisplayURL
+            let dispURL  = photo.displayURL ?? photo.feedPreviewURL
+            let gIdx: Int? = dispURL != nil ? galleryIdx : nil
+            if dispURL != nil { galleryIdx += 1 }
+            return PhotoGridItem(thumbnailURL: thumbURL, galleryIndex: gIdx)
+        }
+    }
+
+    /// URL фото для полноэкранного просмотра (крупные размеры) — только реальные URL, без nil.
     private var photoDisplayURLs: [String] {
         guard let attachments = post.attachments else { return [] }
-        return attachments.compactMap { $0.photo?.displayURL }
+        return attachments.compactMap { $0.photo?.displayURL ?? $0.photo?.feedPreviewURL }
+    }
+
+    // Используется в fullScreenGalleryView
+    private var photoThumbnailURLs: [String] {
+        photoGridItems.compactMap { $0.thumbnailURL }
     }
 
     private var photoThumbnailURLsAsURLs: [URL] { photoThumbnailURLs.compactMap { URL(string: $0) } }
@@ -185,7 +204,7 @@ struct PostCellView: View {
             if !post.text.isEmpty {
                 bodyText
             }
-            if !photoThumbnailURLs.isEmpty {
+            if !photoGridItems.isEmpty {
                 photoGridView
             }
             if !videoAttachments.isEmpty {
@@ -395,53 +414,118 @@ struct PostCellView: View {
 
     // MARK: - Media
 
+    /// Максимальная высота одного фото в ленте.
+    private let singlePhotoMaxHeight: CGFloat = 360
+    /// Высота ячейки в многофото-сетке.
+    private let gridCellHeight: CGFloat = 120
 
-    /// Сетка фото: 1 — во всю ширину с фиксированным aspect ratio (высота ячейки не меняется после загрузки). 2+ — фиксированная высота строки.
+    // MARK: Пазл-раскладка фото
+    // 1 фото → полная ширина; 2 → два столбца; 3 → три столбца;
+    // 4 → 2×2; 5 → 2+3; 6 → 3+3; 7+ → первые 6 + счётчик «+N» на последней ячейке.
+
+    @ViewBuilder
     private var photoGridView: some View {
-        let count = photoThumbnailURLs.count
-        let columnsCount = count == 1 ? 1 : (count == 2 ? 2 : min(3, count))
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: columnsCount)
+        let all   = photoGridItems
+        let total = all.count
+        let shown = min(total, 6)
+        let extra = total - shown
+        let items = Array(all.prefix(shown))
+        let h     = gridCellHeight
 
-        return LazyVGrid(columns: columns, spacing: 4) {
-            ForEach(Array(photoThumbnailURLs.enumerated()), id: \.offset) { index, urlString in
-                if let url = URL(string: urlString) {
-                    photoThumbnailCell(url: url, index: index, singlePhoto: count == 1)
+        switch shown {
+        case 1:
+            gridCell(items[0], height: singlePhotoMaxHeight, extra: 0)
+        case 2:
+            HStack(spacing: 4) {
+                gridCell(items[0], height: h, extra: 0)
+                gridCell(items[1], height: h, extra: 0)
+            }
+        case 3:
+            HStack(spacing: 4) {
+                gridCell(items[0], height: h, extra: 0)
+                gridCell(items[1], height: h, extra: 0)
+                gridCell(items[2], height: h, extra: 0)
+            }
+        case 4:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    gridCell(items[0], height: h, extra: 0)
+                    gridCell(items[1], height: h, extra: 0)
+                }
+                HStack(spacing: 4) {
+                    gridCell(items[2], height: h, extra: 0)
+                    gridCell(items[3], height: h, extra: 0)
+                }
+            }
+        case 5:
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    gridCell(items[0], height: h, extra: 0)
+                    gridCell(items[1], height: h, extra: 0)
+                }
+                HStack(spacing: 4) {
+                    gridCell(items[2], height: h, extra: 0)
+                    gridCell(items[3], height: h, extra: 0)
+                    gridCell(items[4], height: h, extra: extra)
+                }
+            }
+        default: // 6
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    gridCell(items[0], height: h, extra: 0)
+                    gridCell(items[1], height: h, extra: 0)
+                    gridCell(items[2], height: h, extra: 0)
+                }
+                HStack(spacing: 4) {
+                    gridCell(items[3], height: h, extra: 0)
+                    gridCell(items[4], height: h, extra: 0)
+                    gridCell(items[5], height: h, extra: extra)
                 }
             }
         }
     }
 
-    /// Максимальная высота превью одного фото в ленте (длинные картинки обрезаются, лайки/комменты всегда помещаются).
-    private let singlePhotoMaxHeight: CGFloat = 360
+    /// Одна ячейка сетки: фото или placeholder + опциональный счётчик «+N».
+    @ViewBuilder
+    private func gridCell(_ item: PhotoGridItem, height: CGFloat, extra: Int) -> some View {
+        ZStack {
+            if let urlString = item.thumbnailURL,
+               let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
+                        Color(.systemGray5)
+                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                    case .empty:
+                        Color(.systemGray6).overlay { ProgressView() }
+                    @unknown default:
+                        Color(.systemGray6)
+                    }
+                }
+                .id(urlString)
+            } else {
+                Color(.systemGray5)
+                    .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+            }
 
-    /// Одна ячейка фото: fill в фиксированный frame, clipped — без выхода за границы.
-    private func photoThumbnailCell(url: URL, index: Int, singlePhoto: Bool) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            case .failure:
-                Image(systemName: "photo")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundColor(.secondary)
-            case .empty:
-                ProgressView()
-            @unknown default:
-                ProgressView()
+            if extra > 0 {
+                Color.black.opacity(0.45)
+                Text("+\(extra)")
+                    .font(.title2).fontWeight(.semibold).foregroundStyle(.white)
             }
         }
-        .id(url.absoluteString)
-        .frame(maxWidth: singlePhoto ? .infinity : nil)
-        .frame(height: singlePhoto ? singlePhotoMaxHeight : 120)
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
         .clipped()
         .cornerRadius(8)
         .onTapGesture {
+            guard let idx = item.galleryIndex else { return }
             tokenForGallery = getAccessToken?() ?? authService?.accessToken ?? ""
-            fullScreenPhotoIndex = index
+            fullScreenPhotoIndex = idx
         }
+        .allowsHitTesting(item.galleryIndex != nil || extra == 0)
     }
 
     /// Строка видео: превью или плейсхолдер, тап → onTapVideo (плеер). Сетка по центру.
@@ -691,20 +775,30 @@ struct PostCellView: View {
                 let columns = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
                 LazyVGrid(columns: columns, spacing: 4) {
                     ForEach(Array(repostPhotoURLs.prefix(6).enumerated()), id: \.offset) { index, urlString in
-                        if let url = URL(string: urlString) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image): image.resizable().scaledToFill()
-                                case .failure, .empty: Color(.systemGray5)
-                                @unknown default: Color(.systemGray5)
+                        let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines))
+                        ZStack {
+                            if let url {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let image): image.resizable().scaledToFill()
+                                    case .failure:
+                                        Color(.systemGray5)
+                                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                                    case .empty: Color(.systemGray6).overlay { ProgressView() }
+                                    @unknown default: Color(.systemGray5)
+                                    }
                                 }
+                                .id(urlString)
+                            } else {
+                                Color(.systemGray5)
+                                    .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
                             }
-                            .frame(height: 80)
-                            .clipped()
-                            .cornerRadius(4)
-                            .onTapGesture {
-                                repostFullScreenPhotoIndex = index
-                            }
+                        }
+                        .frame(height: 80)
+                        .clipped()
+                        .cornerRadius(4)
+                        .onTapGesture {
+                            repostFullScreenPhotoIndex = index
                         }
                     }
                 }

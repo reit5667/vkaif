@@ -236,6 +236,37 @@ final class VKApiService: Sendable {
         return response.items.first
     }
 
+    // MARK: - photos.getById
+
+    /// Полные данные фото по списку (ownerId_photoId). Используется для обогащения стабов из newsfeed.get.
+    /// VK принимает до 1000 id за раз; access_key добавляется если есть.
+    func photosGetById(token: String, photoRefs: [(ownerId: Int, photoId: Int, accessKey: String?)]) async throws -> [VKPhoto] {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        guard !photoRefs.isEmpty else { return [] }
+        let ids = photoRefs.map { ref -> String in
+            if let key = ref.accessKey, !key.isEmpty {
+                return "\(ref.ownerId)_\(ref.photoId)_\(key)"
+            }
+            return "\(ref.ownerId)_\(ref.photoId)"
+        }.joined(separator: ",")
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "photos", value: ids),
+            URLQueryItem(name: "extended", value: "1"),
+            URLQueryItem(name: "photo_sizes", value: "1")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.getById") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "photos.getById count=\(photoRefs.count)")
+        let wrapper: VKResponse<[VKPhoto]> = try await network.request(VKResponse<[VKPhoto]>.self, from: request)
+        logger?.info("VKApi", "photos.getById ok returned=\(wrapper.response.count)")
+        return wrapper.response
+    }
+
     // MARK: - friends.get
 
     /// Список друзей (userId = nil — текущий). extended=1 — полные объекты с полями.

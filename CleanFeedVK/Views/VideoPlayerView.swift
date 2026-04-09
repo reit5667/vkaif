@@ -27,6 +27,28 @@ struct VideoPlayerView: View {
     @State private var playRequestTrigger = 0
     /// Инкремент при тапе «Пауза» — один вызов video.pause() (без переключения на «следующее видео» VK).
     @State private var pauseRequestTrigger = 0
+    /// Контролы (кнопки) видимы или скрыты.
+    @State private var controlsVisible = true
+    /// Инкремент отменяет предыдущий delayed-hide.
+    @State private var controlsHideGeneration = 0
+
+    /// Показать контролы; если видео играет — автоскрыть через 3 с.
+    private func showControls() {
+        controlsHideGeneration += 1
+        let gen = controlsHideGeneration
+        withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
+        guard !videoPaused && !videoEnded else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard controlsHideGeneration == gen else { return }
+            withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
+        }
+    }
+
+    /// Скрыть контролы немедленно (тап, когда они уже видимы).
+    private func hideControls() {
+        controlsHideGeneration += 1
+        withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false }
+    }
 
     /// Рилсы (короткие видео): наши кнопки работают. Длинные видео: только родной плеер VK, наши кнопки скрыты.
     private var isReelsLike: Bool {
@@ -45,6 +67,14 @@ struct VideoPlayerView: View {
                 pauseRequestTrigger: pauseRequestTrigger
             )
             .ignoresSafeArea()
+
+            // Прозрачный слой-триггер: тап переключает видимость контролов
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .onTapGesture {
+                    if controlsVisible { hideControls() } else { showControls() }
+                }
 
             VStack {
                 HStack(spacing: 16) {
@@ -141,7 +171,22 @@ struct VideoPlayerView: View {
 
                 bottomBar
             }
+            .opacity(controlsVisible || videoPaused || videoEnded ? 1 : 0)
+            .animation(.easeInOut(duration: 0.25), value: controlsVisible)
         }
+        .onAppear { showControls() }
+        .onChange(of: videoPaused) { isPaused in
+            if isPaused { cancelAutoHide() } else { showControls() }
+        }
+        .onChange(of: videoEnded) { ended in
+            if ended { cancelAutoHide() }
+        }
+    }
+
+    /// Отменяет отложенное скрытие и оставляет контролы видимыми (пауза / конец видео).
+    private func cancelAutoHide() {
+        controlsHideGeneration += 1
+        withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true }
     }
 
     private var bottomBar: some View {

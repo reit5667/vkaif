@@ -1,5 +1,13 @@
 # progress.md
 
+## 2026-04-09
+
+- Закрыта **TASK-031** — превью фото в ленте не загружались.
+  - Причина: `newsfeed.get` возвращает фото-стабы (только `id`+`owner_id`, без `sizes`/`photo_xxx`). VK отдаёт полные данные только для части фото в посте.
+  - Решение: добавлен `VKApiService.photosGetById` и `enrichPhotoStubs` в `ContentView` — после загрузки ленты стабы подгружаются батч-запросом и заменяются в постах.
+  - Дополнительно: trimming URL в `urlFromSizes`; placeholder в `repostBlock` (был пустой элемент при nil URL); `.id(photo.id)` на ячейках `AlbumPhotosView`.
+- **TASK-033** уже был done в предыдущей сессии; статус обновлён.
+
 ## 2026-04-04
 
 - Закрыты и вручную проверены `TASK-001`, `TASK-002`, `TASK-003`.
