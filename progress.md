@@ -1,5 +1,12 @@
 # progress.md
 
+## 2026-04-10
+
+- Закрыта **TASK-027** — UI-кнопки видеоплеера скрываются при воспроизведении. JS `play`-event → `videoPlaying` message; кнопка закрытия всегда видима; `UITapGestureRecognizer(cancelsTouchesInView: false)` вместо `Color.clear`-слоя — VK-плеер получает тапы.
+- Закрыта **TASK-034** — pull-to-refresh в ленте + прокрутка к верху. `loadFeed()` возвращает `Task`, `.refreshable` ждёт завершения.
+- Закрыта **TASK-032** — puzzle-раскладка фото. `case 3`: большое фото слева + два маленьких справа.
+- Внеплановый фикс: одиночное фото в ленте — `scaledToFit` вместо `fill`, `maxHeight: 520`.
+
 ## 2026-04-09
 
 - Закрыта **TASK-031** — превью фото в ленте не загружались.

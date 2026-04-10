@@ -64,27 +64,15 @@ struct VideoPlayerView: View {
                 videoEnded: $videoEnded,
                 videoPaused: $videoPaused,
                 playRequestTrigger: playRequestTrigger,
-                pauseRequestTrigger: pauseRequestTrigger
+                pauseRequestTrigger: pauseRequestTrigger,
+                onTap: { if controlsVisible { hideControls() } else { showControls() } }
             )
             .ignoresSafeArea()
 
-            // Прозрачный слой-триггер: тап переключает видимость контролов
-            Color.clear
-                .contentShape(Rectangle())
-                .ignoresSafeArea()
-                .onTapGesture {
-                    if controlsVisible { hideControls() } else { showControls() }
-                }
-
+            // Авто-скрываемые контролы: пауза/повтор (рилсы), центральная кнопка, лайки/комментарии.
             VStack {
                 HStack(spacing: 16) {
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                    }
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 44) // место под крестик
                     if isReelsLike {
                         Button(action: {
                             if videoPaused {
@@ -173,6 +161,22 @@ struct VideoPlayerView: View {
             }
             .opacity(controlsVisible || videoPaused || videoEnded ? 1 : 0)
             .animation(.easeInOut(duration: 0.25), value: controlsVisible)
+            .allowsHitTesting(controlsVisible || videoPaused || videoEnded)
+
+            // Кнопка закрытия — всегда видима поверх плеера.
+            VStack {
+                HStack {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.6), radius: 3, x: 0, y: 1)
+                    }
+                    Spacer()
+                }
+                .padding(16)
+                Spacer()
+            }
         }
         .onAppear { showControls() }
         .onChange(of: videoPaused) { isPaused in
@@ -313,11 +317,19 @@ private let videoBridgeScript = """
         else
             window.parent.postMessage({ type: 'videoPaused' }, '*');
     }
+    function postPlaying() {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoPlaying)
+            window.webkit.messageHandlers.videoPlaying.postMessage('playing');
+        else
+            window.parent.postMessage({ type: 'videoPlaying' }, '*');
+    }
     window.addEventListener('message', function(e) {
         if (e.data && e.data.type === 'videoEnded' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoEnded)
             window.webkit.messageHandlers.videoEnded.postMessage('ended');
         if (e.data && e.data.type === 'videoPaused' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoPaused)
             window.webkit.messageHandlers.videoPaused.postMessage('paused');
+        if (e.data && e.data.type === 'videoPlaying' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.videoPlaying)
+            window.webkit.messageHandlers.videoPlaying.postMessage('playing');
         if (e.data && e.data.type === 'requestPlay') {
             var v = originalVideo || document.querySelector('video');
             if (v) v.play();
@@ -333,6 +345,7 @@ private let videoBridgeScript = """
         v.dataset.videoBridge = '1';
         v.addEventListener('ended', postEnded);
         v.addEventListener('pause', postPaused);
+        v.addEventListener('play', postPlaying);
     }
     function setup() {
         var v = document.querySelector('video');
@@ -387,6 +400,7 @@ private struct VideoWebView: UIViewRepresentable {
     @Binding var videoPaused: Bool
     var playRequestTrigger: Int
     var pauseRequestTrigger: Int
+    var onTap: () -> Void
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -412,11 +426,17 @@ private struct VideoWebView: UIViewRepresentable {
         config.userContentController.addUserScript(keepVisibleScript)
         config.userContentController.add(context.coordinator, name: "videoEnded")
         config.userContentController.add(context.coordinator, name: "videoPaused")
+        config.userContentController.add(context.coordinator, name: "videoPlaying")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.bounces = false
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.navigationDelegate = context.coordinator
+        // Жест тапа с cancelsTouchesInView = false: WKWebView получает тап (VK-плеер работает),
+        // и мы одновременно переключаем видимость контролов.
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+        tap.cancelsTouchesInView = false
+        webView.addGestureRecognizer(tap)
         return webView
     }
 
@@ -424,6 +444,7 @@ private struct VideoWebView: UIViewRepresentable {
         let coord = context.coordinator
         coord.videoEndedBinding = $videoEnded
         coord.videoPausedBinding = $videoPaused
+        coord.onTap = onTap
         if replayTrigger != coord.lastReplayTrigger {
             coord.lastReplayTrigger = replayTrigger
             DispatchQueue.main.async {
@@ -471,6 +492,9 @@ private struct VideoWebView: UIViewRepresentable {
         var lastVideoEnded: Bool = false
         var videoEndedBinding: Binding<Bool>?
         var videoPausedBinding: Binding<Bool>?
+        var onTap: (() -> Void)?
+
+        @objc func handleTap() { onTap?() }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "videoEnded" {
@@ -480,6 +504,10 @@ private struct VideoWebView: UIViewRepresentable {
             } else if message.name == "videoPaused" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                     self?.videoPausedBinding?.wrappedValue = true
+                }
+            } else if message.name == "videoPlaying" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.videoPausedBinding?.wrappedValue = false
                 }
             }
         }

@@ -414,8 +414,8 @@ struct PostCellView: View {
 
     // MARK: - Media
 
-    /// Максимальная высота одного фото в ленте.
-    private let singlePhotoMaxHeight: CGFloat = 360
+    /// Максимальная высота одного фото в ленте (scaledToFit — не обрезает портретные).
+    private let singlePhotoMaxHeight: CGFloat = 520
     /// Высота ячейки в многофото-сетке.
     private let gridCellHeight: CGFloat = 120
 
@@ -434,17 +434,20 @@ struct PostCellView: View {
 
         switch shown {
         case 1:
-            gridCell(items[0], height: singlePhotoMaxHeight, extra: 0)
+            singlePhotoCell(items[0])
         case 2:
             HStack(spacing: 4) {
                 gridCell(items[0], height: h, extra: 0)
                 gridCell(items[1], height: h, extra: 0)
             }
         case 3:
-            HStack(spacing: 4) {
-                gridCell(items[0], height: h, extra: 0)
-                gridCell(items[1], height: h, extra: 0)
-                gridCell(items[2], height: h, extra: 0)
+            // Одно большое слева + два маленьких справа
+            HStack(alignment: .top, spacing: 4) {
+                gridCell(items[0], height: h * 2 + 4, extra: 0)
+                VStack(spacing: 4) {
+                    gridCell(items[1], height: h, extra: 0)
+                    gridCell(items[2], height: h, extra: 0)
+                }
             }
         case 4:
             VStack(spacing: 4) {
@@ -483,6 +486,46 @@ struct PostCellView: View {
                 }
             }
         }
+    }
+
+    /// Одиночное фото в посте: scaledToFit без обрезки, высота по содержимому (max singlePhotoMaxHeight).
+    @ViewBuilder
+    private func singlePhotoCell(_ item: PhotoGridItem) -> some View {
+        ZStack {
+            if let urlString = item.thumbnailURL,
+               let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                    case .failure:
+                        Color(.systemGray5)
+                            .frame(height: 200)
+                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                    case .empty:
+                        Color(.systemGray6)
+                            .frame(height: 200)
+                            .overlay { ProgressView() }
+                    @unknown default:
+                        Color(.systemGray6).frame(height: 200)
+                    }
+                }
+                .id(urlString)
+            } else {
+                Color(.systemGray5)
+                    .frame(height: 200)
+                    .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: singlePhotoMaxHeight)
+        .cornerRadius(8)
+        .onTapGesture {
+            guard let idx = item.galleryIndex else { return }
+            tokenForGallery = getAccessToken?() ?? authService?.accessToken ?? ""
+            fullScreenPhotoIndex = idx
+        }
+        .allowsHitTesting(item.galleryIndex != nil)
     }
 
     /// Одна ячейка сетки: фото или placeholder + опциональный счётчик «+N».

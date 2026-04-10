@@ -163,6 +163,10 @@ struct ContentView: View {
                 }
                 .padding(.horizontal)
             }
+            .refreshable {
+                feedScrollToTopTrigger += 1
+                await loadFeed().value
+            }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
                 withAnimation { proxy.scrollTo("feedTop", anchor: .top) }
             }
@@ -456,7 +460,7 @@ struct ContentView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             if case .authenticated = authService.state {
-                Button(action: loadFeed) {
+                Button(action: { loadFeed() }) {
                     Label(
                         feedLoadState.isLoading ? "Загрузка…" : "Загрузить ленту",
                         systemImage: "list.bullet.rectangle"
@@ -504,11 +508,12 @@ struct ContentView: View {
 
     // MARK: - Загрузка ленты
 
-    /// Первая загрузка или обновление (заменяет ленту).
-    private func loadFeed() {
-        guard let token = authService.accessToken else { return }
+    /// Первая загрузка или обновление (заменяет ленту). Возвращает Task — можно await для refreshable.
+    @discardableResult
+    private func loadFeed() -> Task<Void, Never> {
+        guard let token = authService.accessToken else { return Task {} }
         feedLoadState = .loading
-        Task {
+        return Task {
             do {
                 let response = try await vkApi.getNewsfeed(token: token)
                 let filtered = feedFilter.filter(response.items)
