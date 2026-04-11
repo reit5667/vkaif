@@ -15,7 +15,6 @@ struct FullScreenImageView: View {
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
-    @State private var zoomAnchor: UnitPoint = .center
     @State private var viewSize: CGSize = .zero
     @State private var panOffset: CGSize = .zero
     @State private var lastPanOffset: CGSize = .zero
@@ -53,26 +52,36 @@ struct FullScreenImageView: View {
                             .onChange(of: geo.size) { _, new in viewSize = new }
                     }
                 )
-                .scaleEffect(scale, anchor: zoomAnchor)
+                .scaleEffect(scale)
                 .offset(x: panOffset.width, y: panOffset.height)
                 .gesture(
                     MagnifyGesture()
                         .onChanged { value in
-                            // Устанавливаем anchor только в начале нового pinch (когда zoom = 1).
-                            // Если уже zoomed — не меняем anchor, чтобы изображение не прыгало.
-                            if lastScale <= 1.0 {
-                                zoomAnchor = value.startAnchor
+                            let newScale = min(maxScale, max(minScale, lastScale * value.magnification))
+                            // Держим точку под пальцами (startAnchor) неподвижной.
+                            // r = newScale/lastScale; newOffset = pinchPoint*(1-r) + lastOffset*r
+                            if viewSize.width > 0 && viewSize.height > 0 {
+                                let tx = (value.startAnchor.x - 0.5) * viewSize.width
+                                let ty = (value.startAnchor.y - 0.5) * viewSize.height
+                                let r = newScale / lastScale
+                                let newOffsetX = tx * (1 - r) + lastPanOffset.width * r
+                                let newOffsetY = ty * (1 - r) + lastPanOffset.height * r
+                                let maxW = max(0, viewSize.width * (newScale - 1) / 2)
+                                let maxH = max(0, viewSize.height * (newScale - 1) / 2)
+                                panOffset = CGSize(
+                                    width: min(maxW, max(-maxW, newOffsetX)),
+                                    height: min(maxH, max(-maxH, newOffsetY))
+                                )
                             }
-                            let newScale = lastScale * value.magnification
-                            scale = min(maxScale, max(minScale, newScale))
+                            scale = newScale
                             onScaleChange?(scale)
                         }
                         .onEnded { _ in
                             lastScale = scale
+                            lastPanOffset = panOffset
                             if scale <= 1 {
                                 panOffset = .zero
                                 lastPanOffset = .zero
-                                zoomAnchor = .center
                             }
                             onScaleChange?(scale)
                         }
@@ -83,39 +92,6 @@ struct FullScreenImageView: View {
                     lastPanOffset: $lastPanOffset,
                     panOffset: $panOffset
                 ))
-                .gesture(
-                    SpatialTapGesture(count: 2)
-                        .onEnded { event in
-                            let loc = event.location
-                            let w = viewSize.width
-                            let h = viewSize.height
-                            if w > 0, h > 0 {
-                                let ux = min(1, max(0, loc.x / w))
-                                let uy = min(1, max(0, loc.y / h))
-                                zoomAnchor = UnitPoint(x: ux, y: uy)
-                            }
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                if scale > 1 {
-                                    scale = 1
-                                    lastScale = 1
-                                    panOffset = .zero
-                                    lastPanOffset = .zero
-                                    onScaleChange?(1)
-                                } else {
-                                    scale = doubleTapZoomScale
-                                    lastScale = doubleTapZoomScale
-                                    onScaleChange?(doubleTapZoomScale)
-                                }
-                            }
-                        }
-                )
-                .onChange(of: scale) { _, newScale in
-                    if newScale <= 1 {
-                        panOffset = .zero
-                        lastPanOffset = .zero
-                    }
-                    onScaleChange?(newScale)
-                }
                 .onAppear {
                     onScaleChange?(scale)
                 }
@@ -127,7 +103,29 @@ struct FullScreenImageView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
+        // onTapGesture(count:2) добавляется первым → SwiftUI даёт ему более высокий приоритет.
+        // При двойном тапе count:2 побеждает и count:1 не срабатывает.
+        // Это стандартный SwiftUI-паттерн; SwiftUI координирует их через UIKit require(toFail:).
+        .onTapGesture(count: 2) {
+            if scale > 1 {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    scale = 1
+                    lastScale = 1
+                    panOffset = .zero
+                    lastPanOffset = .zero
+                    onScaleChange?(1)
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    scale = doubleTapZoomScale
+                    lastScale = doubleTapZoomScale
+                    panOffset = .zero
+                    lastPanOffset = .zero
+                    onScaleChange?(doubleTapZoomScale)
+                }
+            }
+        }
+        .onTapGesture(count: 1) {
             if let onTap = onTap {
                 onTap()
             } else {
@@ -148,7 +146,9 @@ struct FullScreenImageView: View {
     }
 }
 
-/// Пан по картинке только при scale > 1; при scale == 1 жест не вешается, чтобы TabView получал свайпы для перелистывания.
+/// Пан по картинке только при scale > 1.
+/// Жест ВСЕГДА присутствует в дереве вью (включается/выключается через .including),
+/// иначе SwiftUI пересоздаёт AsyncImage при каждом переходе через порог scale == 1.
 private struct PanWhenZoomedModifier: ViewModifier {
     let scale: CGFloat
     let viewSize: CGSize
@@ -156,27 +156,26 @@ private struct PanWhenZoomedModifier: ViewModifier {
     @Binding var panOffset: CGSize
 
     func body(content: Content) -> some View {
-        if scale > 1 {
-            content.simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
-                        let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
-                        var next = CGSize(
-                            width: lastPanOffset.width + value.translation.width,
-                            height: lastPanOffset.height + value.translation.height
-                        )
-                        next.width = min(maxW, max(-maxW, next.width))
-                        next.height = min(maxH, max(-maxH, next.height))
-                        panOffset = next
-                    }
-                    .onEnded { _ in
-                        lastPanOffset = panOffset
-                    }
-            )
-        } else {
-            content
-        }
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    guard scale > 1 else { return }
+                    let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
+                    let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
+                    var next = CGSize(
+                        width: lastPanOffset.width + value.translation.width,
+                        height: lastPanOffset.height + value.translation.height
+                    )
+                    next.width = min(maxW, max(-maxW, next.width))
+                    next.height = min(maxH, max(-maxH, next.height))
+                    panOffset = next
+                }
+                .onEnded { _ in
+                    guard scale > 1 else { return }
+                    lastPanOffset = panOffset
+                },
+            including: scale > 1 ? .all : .none
+        )
     }
 }
 
@@ -379,17 +378,13 @@ struct FullScreenPhotoGalleryView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .onTapGesture(perform: onDismiss)
             } else {
-                Group {
-                    if currentPageZoomScale > 1 {
-                        pagingTabView
-                            .highPriorityGesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { _ in }
-                            )
-                    } else {
-                        pagingTabView
-                    }
-                }
+                // Структура вью не меняется при zoom — включаем/выключаем жест через .including,
+                // иначе SwiftUI пересоздаёт TabView и AsyncImage перезагружается.
+                pagingTabView
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 0).onChanged { _ in },
+                        including: currentPageZoomScale > 1 ? .all : .none
+                    )
                 .onChange(of: currentIndex) { _, _ in
                     currentPageZoomScale = 1
                 }
