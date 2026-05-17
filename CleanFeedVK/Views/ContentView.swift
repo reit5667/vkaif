@@ -12,6 +12,7 @@ struct ContentView: View {
     /// Один ViewModel для таба «Профиль» — не пересоздаётся при переключении табов, данные друзей/групп/альбомов сохраняются.
     @StateObject private var profileViewModel: ProfileViewModel
     @State private var showAuthView = false
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     init() {
         let auth = AuthService()
@@ -72,17 +73,29 @@ struct ContentView: View {
                             MessagesTabView(authService: authService)
                         }
                         .tabItem { Label("Сообщения", systemImage: "bubble.left.and.bubble.right") }
+                        MusicView(authService: authService)
+                            .tabItem { Label("Музыка", systemImage: "music.note") }
                         NavigationStack {
                             ProfileView(authService: authService, viewModel: profileViewModel)
                         }
                         .tabItem { Label("Профиль", systemImage: "person.circle") }
                     }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        MiniPlayerView()
+                    }
                 } else {
-                    mainContentStack
+                    if hasCompletedOnboarding {
+                        mainContentStack
+                    } else {
+                        OnboardingView(authService: authService)
+                    }
                 }
             }
             .sheet(isPresented: $showAuthView) {
                 AuthView(authService: authService)
+            }
+            .onChange(of: authService.state) { _, state in
+                if case .authenticated = state { hasCompletedOnboarding = true }
             }
             .onChange(of: scenePhase) { _, new in
                 if new == .active, case .authenticated = authService.state {

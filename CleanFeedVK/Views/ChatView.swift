@@ -2,6 +2,8 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
+import AVFoundation
+import QuickLook
 
 /// Экран чата: история (getHistory), ввод и отправка (send), пагинация вверх.
 struct ChatView: View {
@@ -32,6 +34,15 @@ struct ChatView: View {
     @State private var galleryIndex: Int = 0
     @State private var showGallery = false
     @State private var anchorMessageId: Int? = nil
+    @State private var audioPlayer: AVPlayer? = nil
+    @State private var playingAudioMsgId: Int? = nil
+    @State private var audioProgress: Double = 0
+    @State private var audioTimer: Timer? = nil
+    @State private var videoPlayerURL: URL? = nil
+    @State private var loadingVideoId: String? = nil
+    @State private var quickLookURL: URL? = nil
+    @State private var loadingDocId: Int? = nil
+    @State private var showStickerPicker = false
 
     private let vkApi = VKApiService()
     private let pageSize = 30
@@ -120,6 +131,20 @@ struct ChatView: View {
                 getAccessToken: { authService.accessToken ?? "" }
             )
         }
+        .fullScreenCover(
+            isPresented: Binding(get: { videoPlayerURL != nil }, set: { if !$0 { videoPlayerURL = nil } })
+        ) {
+            if let url = videoPlayerURL {
+                VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil })
+            }
+        }
+        .sheet(
+            isPresented: Binding(get: { quickLookURL != nil }, set: { if !$0 { quickLookURL = nil } })
+        ) {
+            if let url = quickLookURL {
+                QuickLookPreview(url: url)
+            }
+        }
     }
 
     private var messagesList: some View {
@@ -189,37 +214,86 @@ struct ChatView: View {
             if isOut { Spacer(minLength: 48) }
             VStack(alignment: isOut ? .trailing : .leading, spacing: 2) {
                 let photos = (msg.attachments ?? []).compactMap { $0.photo }
-                VStack(alignment: isOut ? .trailing : .leading, spacing: 6) {
-                    if let reply = msg.replyMessage {
-                        HStack(spacing: 6) {
-                            Rectangle()
-                                .frame(width: 2)
-                                .foregroundStyle(Color.accentColor)
-                                .clipShape(RoundedRectangle(cornerRadius: 1))
-                            Text(reply.text.isEmpty ? "[Фото]" : reply.text)
-                                .font(.caption)
-                                .lineLimit(2)
-                                .foregroundStyle(.secondary)
+                let sticker = (msg.attachments ?? []).first(where: { $0.type == "sticker" })?.sticker
+                let wallPosts = (msg.attachments ?? []).compactMap { $0.wall }
+                let audioMsg = (msg.attachments ?? []).first(where: { $0.type == "audio_message" })?.audioMessage
+                let videos = (msg.attachments ?? []).compactMap { $0.video }
+                let docs = (msg.attachments ?? []).compactMap { $0.doc }
+                if let sticker = sticker {
+                    stickerView(sticker)
+                        .opacity(deleting ? 0.5 : 1.0)
+                } else if let audioMsg = audioMsg {
+                    voiceMessageView(audioMsg, msgId: msg.id, isOut: isOut)
+                        .opacity(deleting ? 0.5 : 1.0)
+                } else if !videos.isEmpty {
+                    VStack(alignment: isOut ? .trailing : .leading, spacing: 4) {
+                        if !msg.text.isEmpty {
+                            Text(msg.text)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.top, 6)
+                        ForEach(Array(videos.enumerated()), id: \.offset) { _, video in
+                            videoAttachmentView(video)
+                        }
                     }
-                    if !msg.text.isEmpty {
-                        Text(msg.text)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, msg.replyMessage == nil && photos.isEmpty ? 8 : 0)
-                            .padding(.top, msg.replyMessage != nil ? 0 : (photos.isEmpty ? 0 : 8))
-                            .padding(.bottom, photos.isEmpty ? 8 : 0)
+                    .opacity(deleting ? 0.5 : 1.0)
+                } else if !wallPosts.isEmpty {
+                    VStack(alignment: isOut ? .trailing : .leading, spacing: 4) {
+                        if !msg.text.isEmpty {
+                            Text(msg.text)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: isOut ? .trailing : .leading)
+                                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        ForEach(Array(wallPosts.enumerated()), id: \.offset) { _, post in
+                            wallPostCard(post)
+                        }
                     }
-                    if !photos.isEmpty {
-                        messagePhotoGrid(photos, msgId: msg.id)
-                            .padding(.top, msg.text.isEmpty && msg.replyMessage == nil ? 0 : 4)
+                    .opacity(deleting ? 0.5 : 1.0)
+                } else {
+                    VStack(alignment: isOut ? .trailing : .leading, spacing: 6) {
+                        if let reply = msg.replyMessage {
+                            HStack(spacing: 6) {
+                                Rectangle()
+                                    .frame(width: 2)
+                                    .foregroundStyle(Color.accentColor)
+                                    .clipShape(RoundedRectangle(cornerRadius: 1))
+                                Text(reply.text.isEmpty ? "[Фото]" : reply.text)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.top, 6)
+                        }
+                        if !msg.text.isEmpty {
+                            Text(msg.text)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, msg.replyMessage == nil && photos.isEmpty ? 8 : 0)
+                                .padding(.top, msg.replyMessage != nil ? 0 : (photos.isEmpty ? 0 : 8))
+                                .padding(.bottom, photos.isEmpty ? 8 : 0)
+                        }
+                        if !photos.isEmpty {
+                            messagePhotoGrid(photos, msgId: msg.id)
+                                .padding(.top, msg.text.isEmpty && msg.replyMessage == nil ? 0 : 4)
+                        }
+                        if !docs.isEmpty {
+                            ForEach(Array(docs.enumerated()), id: \.offset) { _, doc in
+                                docAttachmentView(doc)
+                                    .padding(.horizontal, 8)
+                                    .padding(.bottom, 4)
+                            }
+                        }
                     }
+                    .padding(.vertical, msg.text.isEmpty && msg.replyMessage == nil && !photos.isEmpty ? 0 : 0)
+                    .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .opacity(deleting ? 0.5 : 1.0)
                 }
-                .padding(.vertical, msg.text.isEmpty && msg.replyMessage == nil && !photos.isEmpty ? 0 : 0)
-                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .opacity(deleting ? 0.5 : 1.0)
                 Text(shortTime(msg.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -312,6 +386,302 @@ struct ChatView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func stickerView(_ sticker: VKSticker) -> some View {
+        if let urlStr = sticker.displayURL, let url = URL(string: urlStr) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                case .failure:
+                    Text("[стикер]")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .empty:
+                    ProgressView()
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(width: 128, height: 128)
+        } else {
+            Text("[стикер]")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func voiceMessageView(_ audio: VKAudioMessage, msgId: Int, isOut: Bool) -> some View {
+        let isPlaying = playingAudioMsgId == msgId
+        let totalSec = max(audio.duration, 1)
+        let elapsed = isPlaying ? Int(audioProgress * Double(totalSec)) : 0
+        let displaySec = isPlaying ? elapsed : totalSec
+        HStack(spacing: 10) {
+            Button {
+                toggleAudio(audio, msgId: msgId)
+            } label: {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(isOut ? Color.accentColor : Color.primary)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if isPlaying {
+                    ProgressView(value: audioProgress)
+                        .tint(isOut ? Color.accentColor : Color.primary)
+                        .frame(width: 140)
+                } else {
+                    if let waveform = audio.waveform, !waveform.isEmpty {
+                        WaveformView(waveform: waveform, isOut: isOut)
+                            .frame(width: 140, height: 20)
+                    } else {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.3))
+                            .frame(width: 140, height: 2)
+                    }
+                }
+                Text(formatDuration(displaySec))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func toggleAudio(_ audio: VKAudioMessage, msgId: Int) {
+        if playingAudioMsgId == msgId {
+            audioPlayer?.pause()
+            audioTimer?.invalidate()
+            audioTimer = nil
+            playingAudioMsgId = nil
+            audioProgress = 0
+        } else {
+            audioPlayer?.pause()
+            audioTimer?.invalidate()
+            audioTimer = nil
+            guard let url = audio.playbackURL else { return }
+            let player = AVPlayer(url: url)
+            audioPlayer = player
+            playingAudioMsgId = msgId
+            audioProgress = 0
+            player.play()
+            let duration = Double(audio.duration)
+            audioTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { timer in
+                guard let player = audioPlayer, playingAudioMsgId == msgId else {
+                    timer.invalidate()
+                    return
+                }
+                let current = player.currentTime().seconds
+                if current.isNaN || current < 0 { return }
+                audioProgress = min(current / duration, 1.0)
+                if audioProgress >= 1.0 {
+                    timer.invalidate()
+                    audioTimer = nil
+                    playingAudioMsgId = nil
+                    audioProgress = 0
+                }
+            }
+        }
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    @ViewBuilder
+    private func videoAttachmentView(_ video: VKVideo) -> some View {
+        let videoId = video.videoGetId(ownerFallback: 0)
+        let isLoading = loadingVideoId == videoId
+        ZStack {
+            if let previewStr = video.previewImageURL, let previewURL = URL(string: previewStr) {
+                AsyncImage(url: previewURL) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: Color(.systemGray4)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 160)
+                .clipped()
+            } else {
+                Color(.systemGray4).frame(maxWidth: .infinity).frame(height: 160)
+            }
+            Color.black.opacity(0.3)
+            if isLoading {
+                ProgressView().tint(.white)
+            } else {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            if let dur = video.duration {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text(formatDuration(dur))
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .padding(6)
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: 260)
+        .onTapGesture {
+            guard !isLoading, let token = authService.accessToken else { return }
+            loadingVideoId = videoId
+            Task {
+                defer { loadingVideoId = nil }
+                if let res = try? await vkApi.getVideo(token: token, videos: videoId),
+                   let playerStr = res.items.first?.player,
+                   let url = URL(string: playerStr) {
+                    videoPlayerURL = url
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func docAttachmentView(_ doc: VKDoc) -> some View {
+        let ext = (doc.ext ?? "").uppercased()
+        let name = doc.title ?? "Документ"
+        let isLoading = loadingDocId == doc.id
+        HStack(spacing: 10) {
+            Image(systemName: iconForDocExt(doc.ext))
+                .font(.system(size: 28))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                if !ext.isEmpty {
+                    Text(ext)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if isLoading {
+                ProgressView()
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !isLoading, let urlStr = doc.url, let url = URL(string: urlStr) else { return }
+            loadingDocId = doc.id
+            Task {
+                do {
+                    let (localURL, _) = try await URLSession.shared.download(from: url)
+                    let dest = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(doc.title ?? "document")
+                        .appendingPathExtension(doc.ext ?? "")
+                    try? FileManager.default.removeItem(at: dest)
+                    try FileManager.default.moveItem(at: localURL, to: dest)
+                    await MainActor.run {
+                        loadingDocId = nil
+                        quickLookURL = dest
+                    }
+                } catch {
+                    await MainActor.run { loadingDocId = nil }
+                }
+            }
+        }
+    }
+
+    private func iconForDocExt(_ ext: String?) -> String {
+        switch ext?.lowercased() {
+        case "pdf": return "doc.richtext"
+        case "doc", "docx": return "doc.text"
+        case "xls", "xlsx": return "tablecells"
+        case "ppt", "pptx": return "rectangle.on.rectangle"
+        case "zip", "rar", "7z": return "archivebox"
+        case "mp3", "ogg", "flac", "aac": return "music.note"
+        case "mp4", "mov", "avi": return "film"
+        case "jpg", "jpeg", "png", "gif", "webp": return "photo"
+        default: return "doc"
+        }
+    }
+
+    @ViewBuilder
+    private func wallPostCard(_ post: VKPost) -> some View {
+        let author = wallPostAuthorName(post)
+        let photo = post.attachments?.compactMap { $0.photo }.first
+        VStack(alignment: .leading, spacing: 6) {
+            Text(author)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.accentColor)
+            if !post.text.isEmpty {
+                Text(post.text)
+                    .font(.subheadline)
+                    .lineLimit(4)
+                    .foregroundStyle(.primary)
+            }
+            if let photo, let urlStr = photo.feedPreviewURL, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 80)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            if post.text.isEmpty && photo == nil {
+                Text("[Запись со стены]")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    private func wallPostAuthorName(_ post: VKPost) -> String {
+        let id = post.fromId ?? post.ownerId ?? 0
+        if id > 0 {
+            if let p = profiles.first(where: { $0.id == id }) {
+                let name = [p.firstName, p.lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+                return name.isEmpty ? "ID\(id)" : name
+            }
+            return "ID\(id)"
+        } else if id < 0 {
+            if let g = groups.first(where: { $0.id == -id }) {
+                return g.name ?? "Сообщество"
+            }
+            return "Сообщество"
+        }
+        return "Запись со стены"
     }
 
     private func pinnedBanner(_ msg: VKMessage) -> some View {
@@ -432,6 +802,21 @@ struct ChatView: View {
                 attachMenu
                     .presentationDetents([.height(120)])
                     .presentationDragIndicator(.visible)
+            }
+
+            Button {
+                showStickerPicker = true
+            } label: {
+                Image(systemName: "face.smiling")
+                    .font(.title)
+            }
+            .disabled(sending)
+            .sheet(isPresented: $showStickerPicker) {
+                StickerPickerView(authService: authService) { stickerId in
+                    Task { await sendSticker(stickerId) }
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
 
             TextField("Сообщение", text: $inputText, axis: .vertical)
@@ -598,6 +983,21 @@ struct ChatView: View {
             await MainActor.run { sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
         }
     }
+
+    private func sendSticker(_ stickerId: Int) async {
+        guard let token = authService.accessToken, !token.isEmpty else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            let messageId = try await vkApi.sendSticker(token: token, peerId: peerId, stickerId: stickerId)
+            let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+            let newMsg = VKMessage(id: messageId, fromId: fromId, peerId: peerId, date: Date(), text: "", out: 1, readState: nil)
+            messages.append(newMsg)
+            totalCount += 1
+        } catch {
+            sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
 }
 
 private struct ChatImageDataTransfer: Transferable {
@@ -618,4 +1018,46 @@ private func decodeImageFromData(_ data: Data) -> UIImage? {
     let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
     guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else { return nil }
     return UIImage(cgImage: cgImage)
+}
+
+private struct QuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { url as NSURL }
+    }
+}
+
+private struct WaveformView: View {
+    let waveform: [Int]
+    let isOut: Bool
+
+    var body: some View {
+        let bars = stride(from: 0, to: waveform.count, by: max(1, waveform.count / 30)).map { waveform[$0] }
+        let maxVal = bars.max() ?? 1
+        GeometryReader { geo in
+            HStack(alignment: .center, spacing: 1.5) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { _, val in
+                    let h = max(2, geo.size.height * CGFloat(val) / CGFloat(maxVal))
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(isOut ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.6))
+                        .frame(width: 2, height: h)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 }

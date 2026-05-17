@@ -2,99 +2,30 @@ import SwiftUI
 import Photos
 import UIKit
 
-/// Один URL — на весь экран. Zoom: двойной тап или pinch. При scale > 1 — пан по картинке (движение по деталям), не листание. Если onTap задан — одиночный тап переключает панель; иначе тап закрывает.
+/// Один URL — на весь экран. Zoom: двойной тап или pinch (UIScrollView). При scale > 1 — пан по картинке. Если onTap задан — одиночный тап переключает панель; иначе тап закрывает.
 struct FullScreenImageView: View {
     let imageURL: URL?
     let onDismiss: () -> Void
-    /// Если задан — по тапу вызывается onTap (галерея: показать панель); иначе тап = onDismiss.
     var onTap: (() -> Void)? = nil
-    /// При изменении scale вызывается (для галереи: при scale > 1 не листать страницы).
     var onScaleChange: ((CGFloat) -> Void)? = nil
-    /// Свайп вниз: только при scale == 1. Используется внутри TabView — жест вешается на ячейку (не на TabView), что сохраняет горизонтальное листание.
     var onSwipeDown: (() -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
-    @State private var viewSize: CGSize = .zero
-    @State private var panOffset: CGSize = .zero
-    @State private var lastPanOffset: CGSize = .zero
-
-    private let minScale: CGFloat = 1.0
-    private let maxScale: CGFloat = 4.0
-    private let doubleTapZoomScale: CGFloat = 2.5
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let url = imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    case .failure:
-                        Image(systemName: "photo")
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(.white.opacity(0.5))
-                    case .empty:
-                        ProgressView()
-                            .tint(.white)
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-                .background(
-                    GeometryReader { geo in
-                        Color.clear
-                            .onAppear { viewSize = geo.size }
-                            .onChange(of: geo.size) { _, new in viewSize = new }
-                    }
+                ZoomableScrollView(
+                    url: url,
+                    onSingleTap: { [onTap, onDismiss] in onTap != nil ? onTap!() : onDismiss() },
+                    onScaleChange: { newScale in
+                        scale = newScale
+                        onScaleChange?(newScale)
+                    },
+                    onSwipeDown: onSwipeDown
                 )
-                .scaleEffect(scale)
-                .offset(x: panOffset.width, y: panOffset.height)
-                .gesture(
-                    MagnifyGesture()
-                        .onChanged { value in
-                            let newScale = min(maxScale, max(minScale, lastScale * value.magnification))
-                            // Держим точку под пальцами (startAnchor) неподвижной.
-                            // r = newScale/lastScale; newOffset = pinchPoint*(1-r) + lastOffset*r
-                            if viewSize.width > 0 && viewSize.height > 0 {
-                                let tx = (value.startAnchor.x - 0.5) * viewSize.width
-                                let ty = (value.startAnchor.y - 0.5) * viewSize.height
-                                let r = newScale / lastScale
-                                let newOffsetX = tx * (1 - r) + lastPanOffset.width * r
-                                let newOffsetY = ty * (1 - r) + lastPanOffset.height * r
-                                let maxW = max(0, viewSize.width * (newScale - 1) / 2)
-                                let maxH = max(0, viewSize.height * (newScale - 1) / 2)
-                                panOffset = CGSize(
-                                    width: min(maxW, max(-maxW, newOffsetX)),
-                                    height: min(maxH, max(-maxH, newOffsetY))
-                                )
-                            }
-                            scale = newScale
-                            onScaleChange?(scale)
-                        }
-                        .onEnded { _ in
-                            lastScale = scale
-                            lastPanOffset = panOffset
-                            if scale <= 1 {
-                                panOffset = .zero
-                                lastPanOffset = .zero
-                            }
-                            onScaleChange?(scale)
-                        }
-                )
-                .modifier(PanWhenZoomedModifier(
-                    scale: scale,
-                    viewSize: viewSize,
-                    lastPanOffset: $lastPanOffset,
-                    panOffset: $panOffset
-                ))
-                .onAppear {
-                    onScaleChange?(scale)
-                }
+                .onAppear { onScaleChange?(1.0) }
             } else {
                 Image(systemName: "photo")
                     .resizable()
@@ -102,80 +33,165 @@ struct FullScreenImageView: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
-        .contentShape(Rectangle())
-        // onTapGesture(count:2) добавляется первым → SwiftUI даёт ему более высокий приоритет.
-        // При двойном тапе count:2 побеждает и count:1 не срабатывает.
-        // Это стандартный SwiftUI-паттерн; SwiftUI координирует их через UIKit require(toFail:).
-        .onTapGesture(count: 2) {
-            if scale > 1 {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    scale = 1
-                    lastScale = 1
-                    panOffset = .zero
-                    lastPanOffset = .zero
-                    onScaleChange?(1)
-                }
-            } else {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    scale = doubleTapZoomScale
-                    lastScale = doubleTapZoomScale
-                    panOffset = .zero
-                    lastPanOffset = .zero
-                    onScaleChange?(doubleTapZoomScale)
-                }
-            }
-        }
-        .onTapGesture(count: 1) {
-            if let onTap = onTap {
-                onTap()
-            } else {
-                onDismiss()
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    guard scale <= 1 else { return }
-                    let dy = value.translation.height
-                    let dx = value.translation.width
-                    if abs(dy) > 120 && abs(dy) > abs(dx) {
-                        onSwipeDown?()
-                    }
-                }
-        )
     }
 }
 
-/// Пан по картинке только при scale > 1.
-/// Жест ВСЕГДА присутствует в дереве вью (включается/выключается через .including),
-/// иначе SwiftUI пересоздаёт AsyncImage при каждом переходе через порог scale == 1.
-private struct PanWhenZoomedModifier: ViewModifier {
-    let scale: CGFloat
-    let viewSize: CGSize
-    @Binding var lastPanOffset: CGSize
-    @Binding var panOffset: CGSize
+// MARK: - UIScrollView-based zoom (pinch, double-tap, pan, swipe-down)
 
-    func body(content: Content) -> some View {
-        content.simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    guard scale > 1 else { return }
-                    let maxW = max(0, (viewSize.width * (scale - 1)) / 2)
-                    let maxH = max(0, (viewSize.height * (scale - 1)) / 2)
-                    var next = CGSize(
-                        width: lastPanOffset.width + value.translation.width,
-                        height: lastPanOffset.height + value.translation.height
-                    )
-                    next.width = min(maxW, max(-maxW, next.width))
-                    next.height = min(maxH, max(-maxH, next.height))
-                    panOffset = next
+private struct ZoomableScrollView: UIViewRepresentable {
+    let url: URL
+    let onSingleTap: () -> Void
+    let onScaleChange: ((CGFloat) -> Void)?
+    let onSwipeDown: (() -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSingleTap: onSingleTap, onScaleChange: onScaleChange, onSwipeDown: onSwipeDown)
+    }
+
+    func makeUIView(context: Context) -> ZoomScrollView {
+        let scrollView = ZoomScrollView()
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 4.0
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.backgroundColor = .clear
+        scrollView.bouncesZoom = true
+        scrollView.alwaysBounceVertical = false
+        scrollView.alwaysBounceHorizontal = false
+
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .clear
+        scrollView.addSubview(imageView)
+        context.coordinator.imageView = imageView
+        context.coordinator.scrollView = scrollView
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.require(toFail: doubleTap)
+        scrollView.addGestureRecognizer(singleTap)
+
+        scrollView.panGestureRecognizer.addTarget(context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: ZoomScrollView, context: Context) {
+        context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onScaleChange = onScaleChange
+        context.coordinator.onSwipeDown = onSwipeDown
+        if context.coordinator.currentURL != url {
+            context.coordinator.currentURL = url
+            context.coordinator.loadImage(url: url)
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var onSingleTap: () -> Void
+        var onScaleChange: ((CGFloat) -> Void)?
+        var onSwipeDown: (() -> Void)?
+        var currentURL: URL?
+        weak var imageView: UIImageView?
+        weak var scrollView: ZoomScrollView?
+
+        init(onSingleTap: @escaping () -> Void, onScaleChange: ((CGFloat) -> Void)?, onSwipeDown: (() -> Void)?) {
+            self.onSingleTap = onSingleTap
+            self.onScaleChange = onScaleChange
+            self.onSwipeDown = onSwipeDown
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            centerImage(in: scrollView)
+            onScaleChange?(scrollView.zoomScale)
+        }
+
+        private func centerImage(in scrollView: UIScrollView) {
+            guard let imageView = imageView else { return }
+            let boundsSize = scrollView.bounds.size
+            var frame = imageView.frame
+            frame.origin.x = frame.width < boundsSize.width ? (boundsSize.width - frame.width) / 2 : 0
+            frame.origin.y = frame.height < boundsSize.height ? (boundsSize.height - frame.height) / 2 : 0
+            imageView.frame = frame
+        }
+
+        func loadImage(url: URL) {
+            guard let scrollView = scrollView, let imageView = imageView else { return }
+            scrollView.setZoomScale(1.0, animated: false)
+            imageView.image = nil
+            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                guard let data = data, let image = UIImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    guard let self = self,
+                          let imageView = self.imageView,
+                          let scrollView = self.scrollView else { return }
+                    imageView.image = image
+                    self.setImageFrame(scrollView: scrollView, image: image)
+                    self.onScaleChange?(1.0)
                 }
-                .onEnded { _ in
-                    guard scale > 1 else { return }
-                    lastPanOffset = panOffset
-                },
-            including: scale > 1 ? .all : .none
-        )
+            }.resume()
+        }
+
+        func setImageFrame(scrollView: UIScrollView, image: UIImage) {
+            guard let imageView = imageView else { return }
+            let size = scrollView.bounds.size
+            guard size.width > 0, size.height > 0 else { return }
+            let aspect = image.size.width / image.size.height
+            let scrollAspect = size.width / size.height
+            let w: CGFloat, h: CGFloat
+            if aspect > scrollAspect { w = size.width; h = w / aspect }
+            else { h = size.height; w = h * aspect }
+            imageView.frame = CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h)
+            scrollView.contentSize = CGSize(width: w, height: h)
+        }
+
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let scrollView = scrollView else { return }
+            if scrollView.zoomScale > 1.0 {
+                scrollView.setZoomScale(1.0, animated: true)
+            } else {
+                guard let imageView = imageView else { return }
+                let location = recognizer.location(in: imageView)
+                let zoomScale: CGFloat = 2.5
+                let w = scrollView.bounds.width / zoomScale
+                let h = scrollView.bounds.height / zoomScale
+                scrollView.zoom(to: CGRect(x: location.x - w / 2, y: location.y - h / 2, width: w, height: h), animated: true)
+            }
+        }
+
+        @objc func handleSingleTap() {
+            DispatchQueue.main.async { self.onSingleTap() }
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let scrollView = scrollView, scrollView.zoomScale <= 1.0 else { return }
+            guard recognizer.state == .ended else { return }
+            let translation = recognizer.translation(in: scrollView)
+            let velocity = recognizer.velocity(in: scrollView)
+            if translation.y > 80 && velocity.y > 100 && abs(translation.y) > abs(translation.x) {
+                DispatchQueue.main.async { self.onSwipeDown?() }
+            }
+        }
+    }
+}
+
+/// UIScrollView, не перехватывающий горизонтальные свайпы при zoom == 1 (чтобы TabView мог листать страницы).
+private class ZoomScrollView: UIScrollView {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === panGestureRecognizer,
+              let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        if zoomScale > 1.0 { return true }
+        let t = pan.translation(in: self)
+        if t == .zero { return false }
+        return abs(t.y) > abs(t.x)
     }
 }
 

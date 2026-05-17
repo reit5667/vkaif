@@ -12,11 +12,19 @@ enum AuthError: Error {
 
 // MARK: - Auth State
 
-enum AuthState {
+enum AuthState: Equatable {
     case idle           // Не начинали авторизацию
     case authenticating // В процессе (показан браузер)
     case authenticated  // Успешно, токен есть
     case failed(Error)  // Ошибка
+
+    static func == (lhs: AuthState, rhs: AuthState) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.authenticating, .authenticating), (.authenticated, .authenticated): return true
+        case (.failed, .failed): return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - Auth Service

@@ -1114,6 +1114,49 @@ final class VKApiService: Sendable {
         return response.messageId
     }
 
+    // MARK: - messages.send (sticker)
+
+    func sendSticker(token: String, peerId: Int, stickerId: Int) async throws -> Int {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "sticker_id", value: String(stickerId)),
+            URLQueryItem(name: "random_id", value: String(Int.random(in: 1...Int.max)))
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.send") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        logger?.info("VKApi", "messages.send sticker_id=\(stickerId) peerId=\(peerId)")
+        let response = try await requestVK(MessagesSendResponse.self, from: request)
+        logger?.info("VKApi", "messages.send sticker ok messageId=\(response.messageId)")
+        return response.messageId
+    }
+
+    // MARK: - store.getStickers
+
+    func getStickers(token: String) async throws -> [VKStickerPack] {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "type", value: "stickers"),
+            URLQueryItem(name: "extended", value: "1")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/store.getProducts") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "store.getProducts stickers")
+        let response = try await requestVK(StickerPacksResponse.self, from: request)
+        logger?.info("VKApi", "store.getProducts ok items=\(response.items.count)")
+        return response.items
+    }
+
     // MARK: - messages.delete
 
     /// Удалить сообщение. messageIds — массив id сообщений. deleteForAll: 1 = удалить для всех (беседа).
@@ -1245,5 +1288,27 @@ final class VKApiService: Sendable {
         let list: [SavedMessagesPhotoItem] = try await requestVK([SavedMessagesPhotoItem].self, from: request)
         guard let first = list.first else { throw VKApiError.apiError(code: -1, message: "Нет фото в ответе") }
         return first
+    }
+
+    // MARK: - audio.get
+
+    func getAudio(token: String, ownerId: Int, offset: Int = 0, count: Int = 100) async throws -> AudioGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: "\(ownerId)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "count", value: "\(count)")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/audio.get") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "audio.get ownerId=\(ownerId) offset=\(offset)")
+        let response = try await requestVK(AudioGetResponse.self, from: request)
+        logger?.info("VKApi", "audio.get ok count=\(response.count) items=\(response.items.count)")
+        return response
     }
 }

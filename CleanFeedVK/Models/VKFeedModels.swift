@@ -321,6 +321,9 @@ struct VKAttachment: Decodable {
     let link: VKLink?
     let doc: VKDoc?
     let poll: VKPoll?
+    let sticker: VKSticker?
+    let wall: VKPost?
+    let audioMessage: VKAudioMessage?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -329,6 +332,9 @@ struct VKAttachment: Decodable {
         case link
         case doc
         case poll
+        case sticker
+        case wall
+        case audioMessage = "audio_message"
     }
 
     init(from decoder: Decoder) throws {
@@ -339,7 +345,54 @@ struct VKAttachment: Decodable {
         link = try c.decodeIfPresent(VKLink.self, forKey: .link)
         doc = try c.decodeIfPresent(VKDoc.self, forKey: .doc)
         poll = try c.decodeIfPresent(VKPoll.self, forKey: .poll)
+        sticker = try c.decodeIfPresent(VKSticker.self, forKey: .sticker)
+        wall = try c.decodeIfPresent(VKPost.self, forKey: .wall)
+        audioMessage = try c.decodeIfPresent(VKAudioMessage.self, forKey: .audioMessage)
     }
+}
+
+/// Голосовое сообщение (type=audio_message).
+struct VKAudioMessage: Decodable {
+    let duration: Int
+    let linkMp3: String?
+    let linkOgg: String?
+    let waveform: [Int]?
+
+    enum CodingKeys: String, CodingKey {
+        case duration
+        case linkMp3 = "link_mp3"
+        case linkOgg = "link_ogg"
+        case waveform
+    }
+
+    var playbackURL: URL? {
+        if let mp3 = linkMp3, let url = URL(string: mp3) { return url }
+        if let ogg = linkOgg, let url = URL(string: ogg) { return url }
+        return nil
+    }
+}
+
+/// Стикер во вложении сообщения (type=sticker).
+struct VKSticker: Decodable {
+    let stickerId: Int
+    let images: [VKStickerImage]
+
+    enum CodingKeys: String, CodingKey {
+        case stickerId = "sticker_id"
+        case images
+    }
+
+    /// Предпочитаем 256px; иначе наибольший доступный.
+    var displayURL: String? {
+        images.first(where: { $0.width == 256 })?.url
+            ?? images.max(by: { $0.width < $1.width })?.url
+    }
+}
+
+struct VKStickerImage: Decodable {
+    let url: String
+    let width: Int
+    let height: Int
 }
 
 /// Опрос во вложении поста (type=poll).
@@ -581,6 +634,51 @@ struct VKDoc: Decodable {
     let id: Int
     let title: String?
     let ext: String?
+    let url: String?
+    let size: Int?
+}
+
+// MARK: - Аудиозапись
+
+struct VKAudio: Decodable, Identifiable {
+    let id: Int
+    let ownerId: Int
+    let artist: String
+    let title: String
+    let duration: Int
+    let url: String?
+    let album: VKAudioAlbum?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ownerId = "owner_id"
+        case artist
+        case title
+        case duration
+        case url
+        case album
+    }
+}
+
+struct VKAudioAlbum: Decodable {
+    let thumb: VKAudioThumb?
+}
+
+struct VKAudioThumb: Decodable {
+    let photo135: String?
+    let photo300: String?
+
+    enum CodingKeys: String, CodingKey {
+        case photo135 = "photo_135"
+        case photo300 = "photo_300"
+    }
+
+    var displayURL: String? { photo135 ?? photo300 }
+}
+
+struct AudioGetResponse: Decodable {
+    let count: Int
+    let items: [VKAudio]
 }
 
 // MARK: - Профиль пользователя / группа (для отображения имени)
@@ -1008,5 +1106,35 @@ struct SavedMessagesPhotoItem: Decodable {
     enum CodingKeys: String, CodingKey {
         case id
         case ownerId = "owner_id"
+    }
+}
+
+// MARK: - Стикер-паки
+
+struct StickerPacksResponse: Decodable {
+    let count: Int
+    let items: [VKStickerPack]
+}
+
+struct VKStickerPack: Decodable, Identifiable {
+    let id: Int
+    let title: String?
+    let stickers: [VKStickerPackItem]?
+}
+
+struct VKStickerPackItem: Decodable, Identifiable {
+    let stickerId: Int
+    let images: [VKStickerImage]?
+
+    var id: Int { stickerId }
+
+    enum CodingKeys: String, CodingKey {
+        case stickerId = "sticker_id"
+        case images
+    }
+
+    var displayURL: String? {
+        images?.first(where: { $0.width == 128 })?.url
+            ?? images?.max(by: { $0.width < $1.width })?.url
     }
 }
