@@ -31,8 +31,7 @@ struct ContentView: View {
     /// Переопределения «лайкнуто» после likes.add (postId -> true).
     @State private var postLikedOverrides: [String: Bool] = [:]
     @State private var likeInProgress: Set<String> = []  // postId, чтобы не дублировать запросы
-    @State private var videoPlayerURL: URL? = nil
-    @State private var videoPlayerPost: VKPost? = nil
+    @State private var videoPlayerRequest: VideoPlayerRequest? = nil
     /// Переопределения опросов после голосования. Ключ: "ownerId_postId_pollId".
     @State private var pollVoteOverrides: [String: PollVoteOverride] = [:]
     @State private var pollVoteInProgress: Set<String> = []
@@ -73,15 +72,10 @@ struct ContentView: View {
                             MessagesTabView(authService: authService)
                         }
                         .tabItem { Label("Сообщения", systemImage: "bubble.left.and.bubble.right") }
-                        MusicView(authService: authService)
-                            .tabItem { Label("Музыка", systemImage: "music.note") }
                         NavigationStack {
                             ProfileView(authService: authService, viewModel: profileViewModel)
                         }
                         .tabItem { Label("Профиль", systemImage: "person.circle") }
-                    }
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        MiniPlayerView()
                     }
                 } else {
                     if hasCompletedOnboarding {
@@ -195,13 +189,8 @@ struct ContentView: View {
         .sheet(item: $commentsContext) { ctx in
             PostCommentsView(context: ctx, authService: authService)
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { videoPlayerURL != nil },
-            set: { if !$0 { videoPlayerURL = nil; videoPlayerPost = nil } }
-        )) {
-            if let url = videoPlayerURL {
-                videoPlayerContent(url: url)
-            }
+        .fullScreenCover(item: $videoPlayerRequest) { req in
+            videoPlayerContent(req: req)
         }
         .overlay(alignment: .top) {
             if feedLoadState.isLoading {
@@ -219,9 +208,8 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func videoPlayerContent(url: URL) -> some View {
-        let post = videoPlayerPost
-        let ctx: VideoPlayerPostContext? = post.map { p in
+    private func videoPlayerContent(req: VideoPlayerRequest) -> some View {
+        let ctx: VideoPlayerPostContext? = req.post.map { p in
             VideoPlayerPostContext(
                 likesCount: postLikeOverrides[p.postId] ?? p.likesCount,
                 commentsCount: p.commentsCount,
@@ -236,7 +224,7 @@ struct ContentView: View {
                 }
             )
         }
-        VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil; videoPlayerPost = nil }, postContext: ctx)
+        VideoPlayerView(url: req.url, onDismiss: { videoPlayerRequest = nil }, postContext: ctx)
     }
 
     private var mainContentStack: some View {
@@ -297,8 +285,7 @@ struct ContentView: View {
                 }
             }
             await MainActor.run {
-                videoPlayerURL = url
-                videoPlayerPost = post
+                if let url { videoPlayerRequest = VideoPlayerRequest(url: url, post: post) }
             }
         }
         let onPollVoteAction: (VKPost, VKPoll, Int) -> Void = { p, poll, answerId in

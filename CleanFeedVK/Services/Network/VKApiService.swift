@@ -1306,6 +1306,7 @@ final class VKApiService: Sendable {
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.setValue("KateMobile/52.1 (Android 5.0; Samsung SM-G900F; Build/LRX21T; ru_RU)", forHTTPHeaderField: "User-Agent")
         logger?.info("VKApi", "audio.get ownerId=\(ownerId) offset=\(offset)")
         let response = try await requestVK(AudioGetResponse.self, from: request)
         logger?.info("VKApi", "audio.get ok count=\(response.count) items=\(response.items.count)")

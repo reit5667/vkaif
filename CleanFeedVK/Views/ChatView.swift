@@ -33,12 +33,16 @@ struct ChatView: View {
     @State private var galleryPhotos: [VKPhoto] = []
     @State private var galleryIndex: Int = 0
     @State private var showGallery = false
-    @State private var anchorMessageId: Int? = nil
+    enum ScrollTarget: Equatable {
+        case bottom(Int)
+        case top(Int)
+    }
+    @State private var scrollTarget: ScrollTarget? = nil
     @State private var audioPlayer: AVPlayer? = nil
     @State private var playingAudioMsgId: Int? = nil
     @State private var audioProgress: Double = 0
     @State private var audioTimer: Timer? = nil
-    @State private var videoPlayerURL: URL? = nil
+    @State private var videoPlayerRequest: VideoPlayerRequest? = nil
     @State private var loadingVideoId: String? = nil
     @State private var quickLookURL: URL? = nil
     @State private var loadingDocId: Int? = nil
@@ -131,12 +135,8 @@ struct ChatView: View {
                 getAccessToken: { authService.accessToken ?? "" }
             )
         }
-        .fullScreenCover(
-            isPresented: Binding(get: { videoPlayerURL != nil }, set: { if !$0 { videoPlayerURL = nil } })
-        ) {
-            if let url = videoPlayerURL {
-                VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil })
-            }
+        .fullScreenCover(item: $videoPlayerRequest) { req in
+            VideoPlayerView(url: req.url, onDismiss: { videoPlayerRequest = nil })
         }
         .sheet(
             isPresented: Binding(get: { quickLookURL != nil }, set: { if !$0 { quickLookURL = nil } })
@@ -175,21 +175,20 @@ struct ChatView: View {
                             }
                         }
                         .listStyle(.plain)
-                        .defaultScrollAnchor(.bottom)
-                        .onAppear {
-                            scrollToBottomOnEnter(proxy: proxy)
-                        }
                         .onChange(of: messages.count) { _, _ in
                             let newLastId = messages.last?.id
                             guard newLastId != lastMessageId else { return }
                             lastMessageId = newLastId
-                            scrollToBottom(proxy: proxy)
+                            if let id = newLastId { scrollTarget = .bottom(id) }
                         }
-                        .onChange(of: anchorMessageId) { _, id in
-                            guard let id else { return }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                proxy.scrollTo(id, anchor: .top)
-                                anchorMessageId = nil
+                        .onChange(of: scrollTarget) { _, target in
+                            guard let target else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                switch target {
+                                case .bottom(let id): proxy.scrollTo(id, anchor: .bottom)
+                                case .top(let id): proxy.scrollTo(id, anchor: .top)
+                                }
+                                scrollTarget = nil
                             }
                         }
                     }
@@ -465,6 +464,8 @@ struct ChatView: View {
             audioTimer?.invalidate()
             audioTimer = nil
             guard let url = audio.playbackURL else { return }
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try? AVAudioSession.sharedInstance().setActive(true)
             let player = AVPlayer(url: url)
             audioPlayer = player
             playingAudioMsgId = msgId
@@ -547,7 +548,7 @@ struct ChatView: View {
                 if let res = try? await vkApi.getVideo(token: token, videos: videoId),
                    let playerStr = res.items.first?.player,
                    let url = URL(string: playerStr) {
-                    videoPlayerURL = url
+                    videoPlayerRequest = VideoPlayerRequest(url: url)
                 }
             }
         }
@@ -733,19 +734,6 @@ struct ChatView: View {
     }
 
     /// Скролл к последнему сообщению при заходе в диалог (List не всегда применяет defaultScrollAnchor вовремя).
-    private func scrollToBottomOnEnter(proxy: ScrollViewProxy) {
-        guard let last = messages.last else { return }
-        let id = last.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { proxy.scrollTo(id, anchor: .bottom) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { proxy.scrollTo(id, anchor: .bottom) }
-    }
-
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        guard let last = messages.last else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            proxy.scrollTo(last.id, anchor: .bottom)
-        }
-    }
 
     private func replyBanner(_ msg: VKMessage) -> some View {
         HStack(spacing: 8) {
@@ -883,6 +871,7 @@ struct ChatView: View {
                     groups = res.groups ?? []
                     loadState = .loaded
                     lastMessageId = messages.last?.id
+                    if let id = messages.last?.id { scrollTarget = .bottom(id) }
                 }
             } catch {
                 await MainActor.run { loadState = .failed(error) }
@@ -902,14 +891,9 @@ struct ChatView: View {
                 await MainActor.run {
                     let older = Array(res.items.reversed())
                     messages = older + messages
-                    if res.items.isEmpty {
-                        totalCount = messages.count
-                    }
+                    if res.items.isEmpty { totalCount = messages.count }
                     isLoadingMore = false
-                    // Скроллим к тому сообщению, которое было вверху до загрузки.
-                    // Это убирает ProgressView из viewport → при следующем скролле вверх
-                    // .onAppear сработает снова и подгрузит следующий батч.
-                    anchorMessageId = currentTopId
+                    if let id = currentTopId { scrollTarget = .top(id) }
                 }
             } catch {
                 await MainActor.run { isLoadingMore = false }

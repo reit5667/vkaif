@@ -1,6 +1,13 @@
 import SwiftUI
 import WebKit
 
+/// Обёртка для fullScreenCover(item:) — каждый новый UUID гарантирует пересоздание WKWebView.
+struct VideoPlayerRequest: Identifiable {
+    let id = UUID()
+    let url: URL
+    var post: VKPost? = nil
+}
+
 /// Контекст поста для панели под плеером: лайки и комментарии (как под фото).
 struct VideoPlayerPostContext {
     let likesCount: Int
@@ -69,6 +76,11 @@ struct VideoPlayerView: View {
             )
             .ignoresSafeArea()
 
+            // Когда видео закончилось — накрываем WebView непрозрачным фоном, скрывая рекомендации VK.
+            if videoEnded {
+                Color.black.ignoresSafeArea()
+            }
+
             // Авто-скрываемые контролы: пауза/повтор (рилсы), центральная кнопка, лайки/комментарии.
             VStack {
                 HStack(spacing: 16) {
@@ -131,7 +143,6 @@ struct VideoPlayerView: View {
 
                 Spacer(minLength: 0)
 
-                // Кнопка «Смотреть снова» — после окончания (если событие пришло).
                 if videoEnded {
                     Button(action: {
                         videoEnded = false
@@ -145,14 +156,11 @@ struct VideoPlayerView: View {
                             Text("Смотреть снова")
                                 .font(.subheadline)
                                 .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
-                        .background(Color.black.opacity(0.2))
                     }
                     .buttonStyle(.plain)
-                    .zIndex(1)
                 }
 
                 Spacer(minLength: 0)
@@ -471,15 +479,6 @@ private struct VideoWebView: UIViewRepresentable {
         }
         if videoEnded != coord.lastVideoEnded {
             coord.lastVideoEnded = videoEnded
-            if videoEnded {
-                // Видео закончилось: прогоняем скрипт скрытия рекомендаций несколько раз,
-                // пока VK динамически добавляет блоки в DOM.
-                [0.0, 0.4, 1.0, 2.0].forEach { delay in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak webView] in
-                        webView?.evaluateJavaScript(hideOverlaysScript, completionHandler: nil)
-                    }
-                }
-            }
         }
     }
 
