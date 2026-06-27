@@ -7,25 +7,15 @@ import QuickLook
 
 /// Экран чата: история (getHistory), ввод и отправка (send), пагинация вверх.
 struct ChatView: View {
-    let peerId: Int
-    /// Заголовок из списка диалогов (для бесед и быстрого отображения).
+    @ObservedObject var viewModel: ChatViewModel
     let title: String?
     @ObservedObject var authService: AuthService
 
-    @State private var messages: [VKMessage] = []
-    @State private var profiles: [VKProfile] = []
-    @State private var groups: [VKGroup] = []
-    @State private var totalCount: Int = 0
-    @State private var loadState: LoadState = .idle
+    // UI-only state (не нужно кэшировать между переходами)
     @State private var inputText: String = ""
     @State private var sending = false
     @State private var sendError: String?
-    @State private var isLoadingMore = false
-    @State private var lastMessageId: Int?
-    @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var replyToMessage: VKMessage? = nil
-    @State private var deleteInProgress: Set<Int> = []
-    @State private var pinnedMessage: VKMessage? = nil
     @State private var showMaterials = false
     @State private var showForwardStub = false
     @State private var showAttachMenu = false
@@ -39,6 +29,7 @@ struct ChatView: View {
         case message(Int)
     }
     @State private var scrollTarget: ScrollTarget? = nil
+    @State private var lastMessageId: Int? = nil
     @State private var highlightedMessageId: Int? = nil
     @State private var audioPlayer: AVPlayer? = nil
     @State private var playingAudioMsgId: Int? = nil
@@ -49,40 +40,26 @@ struct ChatView: View {
     @State private var quickLookURL: URL? = nil
     @State private var loadingDocId: Int? = nil
     @State private var showStickerPicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
 
     private let vkApi = VKApiService()
-    private let pageSize = 30
 
-    enum LoadState: Equatable {
-        case idle
-        case loading
-        case loaded
-        case failed(Error)
+    private var peerId: Int { viewModel.peerId }
 
-        static func == (lhs: LoadState, rhs: LoadState) -> Bool {
-            switch (lhs, rhs) {
-            case (.idle, .idle), (.loading, .loading), (.loaded, .loaded): return true
-            case (.failed, .failed): return true
-            default: return false
-            }
-        }
-    }
-
-    /// Заголовок: переданный title или из profiles/groups после загрузки.
     private var chatTitle: String {
         if let t = title, !t.isEmpty { return t }
         if peerId >= 200_000_0000 { return "Беседа" }
-        if let p = profiles.first(where: { $0.id == peerId }) {
+        if let p = viewModel.profiles.first(where: { $0.id == peerId }) {
             let name = [p.firstName, p.lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
             return name.isEmpty ? "ID\(p.id)" : name
         }
-        if let g = groups.first(where: { -$0.id == peerId }) { return g.name ?? "ID\(peerId)" }
+        if let g = viewModel.groups.first(where: { -$0.id == peerId }) { return g.name ?? "ID\(peerId)" }
         return "Загрузка…"
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let pinned = pinnedMessage {
+            if let pinned = viewModel.pinnedMessage {
                 pinnedBanner(pinned)
             }
             if let err = sendError {
@@ -108,8 +85,19 @@ struct ChatView: View {
                 }
             }
         }
-        .onAppear { loadHistory() }
-        .refreshable { loadHistory(force: true) }
+        .onAppear {
+            guard let token = authService.accessToken else { return }
+            viewModel.loadHistory(token: token)
+        }
+        .refreshable {
+            guard let token = authService.accessToken else { return }
+            viewModel.loadHistory(token: token, force: true)
+        }
+        .onChange(of: viewModel.scrollToTopId) { _, id in
+            guard let id else { return }
+            scrollTarget = .top(id)
+            viewModel.scrollToTopId = nil
+        }
         .sheet(isPresented: $showMaterials) {
             DialogMaterialsView(
                 peerId: peerId,
@@ -151,12 +139,12 @@ struct ChatView: View {
 
     private var messagesList: some View {
         Group {
-            switch loadState {
+            switch viewModel.loadState {
             case .idle, .loading:
                 ProgressView("Загрузка…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded:
-                if messages.isEmpty {
+                if viewModel.messages.isEmpty {
                     ContentUnavailableView(
                         "Нет сообщений",
                         systemImage: "bubble.left.and.bubble.right"
@@ -165,13 +153,16 @@ struct ChatView: View {
                 } else {
                     ScrollViewReader { proxy in
                         List {
-                            if messages.count < totalCount {
+                            if viewModel.messages.count < viewModel.totalCount {
                                 ProgressView("Загрузка старых сообщений…")
                                     .frame(maxWidth: .infinity)
                                     .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
-                                    .onAppear { loadMoreHistory() }
+                                    .onAppear {
+                                        guard let token = authService.accessToken else { return }
+                                        viewModel.loadMoreHistory(token: token)
+                                    }
                             }
-                            ForEach(messages, id: \.id) { msg in
+                            ForEach(viewModel.messages, id: \.id) { msg in
                                 messageRow(msg)
                                     .id(msg.id)
                                     .background(
@@ -183,8 +174,8 @@ struct ChatView: View {
                             }
                         }
                         .listStyle(.plain)
-                        .onChange(of: messages.count) { _, _ in
-                            let newLastId = messages.last?.id
+                        .onChange(of: viewModel.messages.count) { _, _ in
+                            let newLastId = viewModel.messages.last?.id
                             guard newLastId != lastMessageId else { return }
                             lastMessageId = newLastId
                             if let id = newLastId { scrollTarget = .bottom(id) }
@@ -221,8 +212,8 @@ struct ChatView: View {
 
     private func messageRow(_ msg: VKMessage) -> some View {
         let isOut = (msg.out ?? 0) == 1
-        let deleting = deleteInProgress.contains(msg.id)
-        let isPinned = pinnedMessage?.id == msg.id
+        let deleting = viewModel.deleteInProgress.contains(msg.id)
+        let isPinned = viewModel.pinnedMessage?.id == msg.id
         return HStack {
             if isOut { Spacer(minLength: 48) }
             VStack(alignment: isOut ? .trailing : .leading, spacing: 2) {
@@ -691,13 +682,13 @@ struct ChatView: View {
     private func wallPostAuthorName(_ post: VKPost) -> String {
         let id = post.fromId ?? post.ownerId ?? 0
         if id > 0 {
-            if let p = profiles.first(where: { $0.id == id }) {
+            if let p = viewModel.profiles.first(where: { $0.id == id }) {
                 let name = [p.firstName, p.lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
                 return name.isEmpty ? "ID\(id)" : name
             }
             return "ID\(id)"
         } else if id < 0 {
-            if let g = groups.first(where: { $0.id == -id }) {
+            if let g = viewModel.groups.first(where: { $0.id == -id }) {
                 return g.name ?? "Сообщество"
             }
             return "Сообщество"
@@ -733,10 +724,9 @@ struct ChatView: View {
         guard let token = authService.accessToken else { return }
         Task {
             do {
-                let pinned = try await vkApi.pinMessage(token: token, peerId: peerId, messageId: msg.id)
-                await MainActor.run { pinnedMessage = pinned }
+                try await viewModel.pinMessage(msg, token: token)
             } catch {
-                await MainActor.run { sendError = "Ошибка закрепления: \(error.localizedDescription)" }
+                sendError = "Ошибка закрепления: \(error.localizedDescription)"
             }
         }
     }
@@ -745,15 +735,12 @@ struct ChatView: View {
         guard let token = authService.accessToken else { return }
         Task {
             do {
-                try await vkApi.unpinMessage(token: token, peerId: peerId)
-                await MainActor.run { pinnedMessage = nil }
+                try await viewModel.unpinMessage(token: token)
             } catch {
-                await MainActor.run { sendError = "Ошибка открепления: \(error.localizedDescription)" }
+                sendError = "Ошибка открепления: \(error.localizedDescription)"
             }
         }
     }
-
-    /// Скролл к последнему сообщению при заходе в диалог (List не всегда применяет defaultScrollAnchor вовремя).
 
     private func replyBanner(_ msg: VKMessage) -> some View {
         HStack(spacing: 8) {
@@ -779,20 +766,11 @@ struct ChatView: View {
 
     private func deleteMessage(_ msg: VKMessage) {
         guard let token = authService.accessToken else { return }
-        deleteInProgress.insert(msg.id)
         Task {
             do {
-                try await vkApi.deleteMessages(token: token, messageIds: [msg.id], deleteForAll: false)
-                await MainActor.run {
-                    messages.removeAll { $0.id == msg.id }
-                    totalCount = max(0, totalCount - 1)
-                    deleteInProgress.remove(msg.id)
-                }
+                try await viewModel.deleteMessage(msg, token: token)
             } catch {
-                await MainActor.run {
-                    deleteInProgress.remove(msg.id)
-                    sendError = "Ошибка удаления: \(error.localizedDescription)"
-                }
+                sendError = "Ошибка удаления: \(error.localizedDescription)"
             }
         }
     }
@@ -874,54 +852,6 @@ struct ChatView: View {
         return f.string(from: date)
     }
 
-    private func loadHistory(force: Bool = false) {
-        guard let token = authService.accessToken else {
-            loadState = .failed(VKApiError.missingToken)
-            return
-        }
-        if !force, case .loaded = loadState { return }
-        if !force, case .loading = loadState { return }
-        loadState = .loading
-        Task {
-            do {
-                let res = try await vkApi.getHistory(token: token, peerId: peerId, count: pageSize, offset: 0)
-                await MainActor.run {
-                    messages = res.items.reversed()
-                    totalCount = res.count
-                    profiles = res.profiles ?? []
-                    groups = res.groups ?? []
-                    loadState = .loaded
-                    lastMessageId = messages.last?.id
-                    if let id = messages.last?.id { scrollTarget = .bottom(id) }
-                }
-            } catch {
-                await MainActor.run { loadState = .failed(error) }
-            }
-        }
-    }
-
-    private func loadMoreHistory() {
-        guard let token = authService.accessToken else { return }
-        guard case .loaded = loadState, messages.count < totalCount, !isLoadingMore else { return }
-        isLoadingMore = true
-        let offset = messages.count
-        let currentTopId = messages.first?.id
-        Task {
-            do {
-                let res = try await vkApi.getHistory(token: token, peerId: peerId, count: pageSize, offset: offset)
-                await MainActor.run {
-                    let older = Array(res.items.reversed())
-                    messages = older + messages
-                    if res.items.isEmpty { totalCount = messages.count }
-                    isLoadingMore = false
-                    if let id = currentTopId { scrollTarget = .top(id) }
-                }
-            } catch {
-                await MainActor.run { isLoadingMore = false }
-            }
-        }
-    }
-
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let token = authService.accessToken else { return }
@@ -932,7 +862,7 @@ struct ChatView: View {
         Task {
             do {
                 let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: randomId, replyTo: replyId)
-                let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+                let fromId = viewModel.outgoingFromId()
                 let newMsg = VKMessage(
                     id: messageId,
                     fromId: fromId,
@@ -942,34 +872,28 @@ struct ChatView: View {
                     out: 1,
                     readState: nil
                 )
-                await MainActor.run {
-                    inputText = ""
-                    replyToMessage = nil
-                    sending = false
-                    withAnimation(.default) {
-                        messages.append(newMsg)
-                        totalCount += 1
-                    }
-                }
+                inputText = ""
+                replyToMessage = nil
+                sending = false
+                viewModel.appendMessage(newMsg)
             } catch {
-                await MainActor.run {
-                    sending = false
-                    sendError = error.localizedDescription
-                }
+                sending = false
+                sendError = error.localizedDescription
             }
         }
     }
 
     private func sendPhoto(from item: PhotosPickerItem) async {
         guard let token = authService.accessToken else {
-            await MainActor.run { sendError = "Нет доступа" }
+            sendError = "Нет доступа"
             return
         }
-        await MainActor.run { sending = true; sendError = nil }
-        defer { Task { @MainActor in sending = false; selectedPhotoItem = nil } }
+        sending = true
+        sendError = nil
+        defer { sending = false }
         do {
             guard let imageData = try await item.loadTransferable(type: ChatImageDataTransfer.self) else {
-                await MainActor.run { sendError = "Не удалось загрузить фото" }
+                sendError = "Не удалось загрузить фото"
                 return
             }
             let jpegData = imageData.dataAsJpeg
@@ -979,15 +903,12 @@ struct ChatView: View {
             let attachment = "photo\(saved.ownerId)_\(saved.id)"
             let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
             let messageId = try await vkApi.sendMessage(token: token, peerId: peerId, message: text, randomId: Int.random(in: 1...Int.max), attachment: attachment)
-            let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+            let fromId = viewModel.outgoingFromId()
             let newMsg = VKMessage(id: messageId, fromId: fromId, peerId: peerId, date: Date(), text: text.isEmpty ? "[Фото]" : text, out: 1, readState: nil)
-            await MainActor.run {
-                inputText = ""
-                messages.append(newMsg)
-                totalCount += 1
-            }
+            inputText = ""
+            viewModel.appendMessage(newMsg)
         } catch {
-            await MainActor.run { sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -997,10 +918,9 @@ struct ChatView: View {
         defer { sending = false }
         do {
             let messageId = try await vkApi.sendSticker(token: token, peerId: peerId, stickerId: stickerId)
-            let fromId = messages.first(where: { ($0.out ?? 0) == 1 })?.fromId ?? 0
+            let fromId = viewModel.outgoingFromId()
             let newMsg = VKMessage(id: messageId, fromId: fromId, peerId: peerId, date: Date(), text: "", out: 1, readState: nil)
-            messages.append(newMsg)
-            totalCount += 1
+            viewModel.appendMessage(newMsg)
         } catch {
             sendError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -1019,7 +939,6 @@ private struct ChatImageDataTransfer: Transferable {
     }
 }
 
-/// Декодирование HEIC и других форматов, когда UIImage(data:) возвращает nil.
 private func decodeImageFromData(_ data: Data) -> UIImage? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     let options: [CFString: Any] = [kCGImageSourceShouldCache: false]

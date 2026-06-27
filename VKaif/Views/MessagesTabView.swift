@@ -4,6 +4,8 @@ import SwiftUI
 struct MessagesTabView: View {
     @ObservedObject var authService: AuthService
 
+    @StateObject private var chatCache = ChatViewModelCache()
+
     @State private var items: [VKConversationItem] = []
     @State private var profiles: [VKProfile] = []
     @State private var groups: [VKGroup] = []
@@ -42,7 +44,8 @@ struct MessagesTabView: View {
         .onAppear { loadConversations() }
         .refreshable { loadConversations(force: true) }
         .navigationDestination(for: ChatDestination.self) { dest in
-            ChatView(peerId: dest.peerId, title: dest.title, authService: authService)
+            let vm = chatCache.viewModel(for: dest.peerId)
+            ChatView(viewModel: vm, title: dest.title, authService: authService)
         }
     }
 
@@ -152,6 +155,7 @@ struct MessagesTabView: View {
             return
         }
         if !force, case .loading = loadState { return }
+        if !force, case .loaded = loadState { return }
         loadState = .loading
         if force {
             items = []
