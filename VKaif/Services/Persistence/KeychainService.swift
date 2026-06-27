@@ -20,7 +20,7 @@ final class KeychainService {
     private let logger: AppLogging?
 
     nonisolated init(
-        service: String = Bundle.main.bundleIdentifier ?? "CleanFeedVK",
+        service: String = Bundle.main.bundleIdentifier ?? "VKaif",
         logger: (any AppLogging)? = nil
     ) {
         self.service = service

@@ -47,7 +47,7 @@ struct PaywallView: View {
                     .foregroundStyle(.white)
             }
             .padding(.top, 16)
-            Text("CleanFeedVK Premium")
+            Text("VKaif Premium")
                 .font(.title2.bold())
             Text("Один раз — навсегда")
                 .font(.subheadline)

@@ -229,7 +229,7 @@ struct ContentView: View {
 
     private var mainContentStack: some View {
         VStack(spacing: 20) {
-            Text("CleanFeedVK")
+            Text("VKaif")
                 .font(.largeTitle)
                 .fontWeight(.bold)
             Divider()
@@ -241,11 +241,11 @@ struct ContentView: View {
     }
 
     private func authorName(for post: VKPost) -> String {
-        CleanFeedVK.authorName(for: post, profiles: feedProfiles, groups: feedGroups)
+        VKaif.authorName(for: post, profiles: feedProfiles, groups: feedGroups)
     }
 
     private func authorAvatarURL(for post: VKPost) -> String? {
-        CleanFeedVK.authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
+        VKaif.authorAvatarURL(for: post, profiles: feedProfiles, groups: feedGroups)
     }
 
     private func feedDestination(for post: VKPost) -> FeedDestination? {
@@ -518,7 +518,7 @@ struct ContentView: View {
                 let response = try await vkApi.getNewsfeed(token: token)
                 let filtered = feedFilter.filter(response.items)
                 if response.items.count != filtered.count {
-                    print("[CleanFeedVK] Фильтр: было \(response.items.count), осталось \(filtered.count)")
+                    print("[VKaif] Фильтр: было \(response.items.count), осталось \(filtered.count)")
                 }
                 if await MainActor.run(body: { currentUserId }) == nil,
                    let users = try? await vkApi.getUsers(token: token),
@@ -564,7 +564,7 @@ struct ContentView: View {
                     isLoadingMore = false
                 }
                 if !enriched.isEmpty {
-                    print("[CleanFeedVK] Подгружено ещё \(enriched.count) постов, next_from: \(response.nextFrom ?? "nil")")
+                    print("[VKaif] Подгружено ещё \(enriched.count) постов, next_from: \(response.nextFrom ?? "nil")")
                 }
             } catch {
                 await MainActor.run {
@@ -741,7 +741,7 @@ struct ContentView: View {
         }
         // Ограничение VK: max 1000 за запрос
         let batch = Array(stubRefs.prefix(1000))
-        print("[CleanFeedVK] enrichPhotoStubs: stub photos=\(stubRefs.count), fetching \(batch.count)")
+        print("[VKaif] enrichPhotoStubs: stub photos=\(stubRefs.count), fetching \(batch.count)")
 
         guard let enrichedPhotos = try? await vkApi.photosGetById(token: token, photoRefs: batch) else {
             return posts
@@ -751,7 +751,7 @@ struct ContentView: View {
             guard let oid = p.ownerId else { continue }
             enrichMap["\(oid)_\(p.id)"] = p
         }
-        print("[CleanFeedVK] enrichPhotoStubs: received \(enrichedPhotos.count) photos")
+        print("[VKaif] enrichPhotoStubs: received \(enrichedPhotos.count) photos")
 
         // Заменяем стабы на полные фото в копиях постов
         return posts.map { post in
@@ -770,7 +770,7 @@ struct ContentView: View {
     }
 
     private func printFeedToConsole(posts: [VKPost], nextFrom: String?) {
-        print("[CleanFeedVK] ——— Лента (после фильтра): \(posts.count) постов ———")
+        print("[VKaif] ——— Лента (после фильтра): \(posts.count) постов ———")
         for (i, post) in posts.enumerated() {
             let preview = String(post.text.prefix(60))
             let more = post.text.count > 60 ? "…" : ""
@@ -779,7 +779,7 @@ struct ContentView: View {
         if let next = nextFrom {
             print("next_from: \(next)")
         }
-        print("[CleanFeedVK] ——— конец ленты ———")
+        print("[VKaif] ——— конец ленты ———")
     }
 }
 

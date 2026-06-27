@@ -36,8 +36,10 @@ struct ChatView: View {
     enum ScrollTarget: Equatable {
         case bottom(Int)
         case top(Int)
+        case message(Int)
     }
     @State private var scrollTarget: ScrollTarget? = nil
+    @State private var highlightedMessageId: Int? = nil
     @State private var audioPlayer: AVPlayer? = nil
     @State private var playingAudioMsgId: Int? = nil
     @State private var audioProgress: Double = 0
@@ -172,6 +174,12 @@ struct ChatView: View {
                             ForEach(messages, id: \.id) { msg in
                                 messageRow(msg)
                                     .id(msg.id)
+                                    .background(
+                                        highlightedMessageId == msg.id
+                                            ? Color.accentColor.opacity(0.15)
+                                            : Color.clear
+                                    )
+                                    .animation(.easeOut(duration: 0.4), value: highlightedMessageId)
                             }
                         }
                         .listStyle(.plain)
@@ -187,6 +195,12 @@ struct ChatView: View {
                                 switch target {
                                 case .bottom(let id): proxy.scrollTo(id, anchor: .bottom)
                                 case .top(let id): proxy.scrollTo(id, anchor: .top)
+                                case .message(let id):
+                                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                                    highlightedMessageId = id
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                        highlightedMessageId = nil
+                                    }
                                 }
                                 scrollTarget = nil
                             }
@@ -268,6 +282,8 @@ struct ChatView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.top, 6)
+                            .contentShape(Rectangle())
+                            .onTapGesture { scrollTarget = .message(reply.id) }
                         }
                         if !msg.text.isEmpty {
                             Text(msg.text)
@@ -376,12 +392,11 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: photos.count == 1 ? 200 : 120)
                 .clipped()
-                .onTapGesture {
-                    let allPhotos = photos
-                    galleryPhotos = allPhotos
+                .simultaneousGesture(TapGesture().onEnded {
+                    galleryPhotos = photos
                     galleryIndex = idx
                     showGallery = true
-                }
+                })
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -540,18 +555,23 @@ struct ChatView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .frame(maxWidth: 260)
-        .onTapGesture {
+        .simultaneousGesture(TapGesture().onEnded {
             guard !isLoading, let token = authService.accessToken else { return }
             loadingVideoId = videoId
             Task {
                 defer { loadingVideoId = nil }
-                if let res = try? await vkApi.getVideo(token: token, videos: videoId),
-                   let playerStr = res.items.first?.player,
-                   let url = URL(string: playerStr) {
-                    videoPlayerRequest = VideoPlayerRequest(url: url)
+                do {
+                    let res = try await vkApi.getVideo(token: token, videos: videoId)
+                    if let playerStr = res.items.first?.player, let url = URL(string: playerStr) {
+                        videoPlayerRequest = VideoPlayerRequest(url: url)
+                    } else {
+                        AppLogger.shared.error("video", "No player URL for \(videoId), items: \(res.items.count)")
+                    }
+                } catch {
+                    AppLogger.shared.error("video", "Load failed: \(error)")
                 }
             }
-        }
+        })
     }
 
     @ViewBuilder
@@ -583,7 +603,7 @@ struct ChatView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
+        .simultaneousGesture(TapGesture().onEnded {
             guard !isLoading, let urlStr = doc.url, let url = URL(string: urlStr) else { return }
             loadingDocId = doc.id
             Task {
@@ -602,7 +622,7 @@ struct ChatView: View {
                     await MainActor.run { loadingDocId = nil }
                 }
             }
-        }
+        })
     }
 
     private func iconForDocExt(_ ext: String?) -> String {
@@ -859,6 +879,7 @@ struct ChatView: View {
             loadState = .failed(VKApiError.missingToken)
             return
         }
+        if !force, case .loaded = loadState { return }
         if !force, case .loading = loadState { return }
         loadState = .loading
         Task {
@@ -925,8 +946,10 @@ struct ChatView: View {
                     inputText = ""
                     replyToMessage = nil
                     sending = false
-                    messages.append(newMsg)
-                    totalCount += 1
+                    withAnimation(.default) {
+                        messages.append(newMsg)
+                        totalCount += 1
+                    }
                 }
             } catch {
                 await MainActor.run {

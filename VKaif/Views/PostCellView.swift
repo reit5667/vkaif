@@ -782,8 +782,8 @@ struct PostCellView: View {
     /// Блок репоста: автор, текст и превью фото из первого элемента copy_history.
     @ViewBuilder
     private func repostBlock(_ repost: VKPost) -> some View {
-        let repostAuthorName = CleanFeedVK.authorName(for: repost, profiles: profiles, groups: groups)
-        let repostAvatarURL = CleanFeedVK.authorAvatarURL(for: repost, profiles: profiles, groups: groups)
+        let repostAuthorName = VKaif.authorName(for: repost, profiles: profiles, groups: groups)
+        let repostAvatarURL = VKaif.authorAvatarURL(for: repost, profiles: profiles, groups: groups)
         let repostPhotoURLs = (repost.attachments ?? []).compactMap { $0.photo?.feedPreviewURL ?? $0.photo?.displayURL }
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {

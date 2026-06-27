@@ -399,7 +399,7 @@ struct FullScreenPhotoGalleryView: View {
                 pagingTabView
                     .highPriorityGesture(
                         DragGesture(minimumDistance: 0).onChanged { _ in },
-                        including: currentPageZoomScale > 1 ? .all : .none
+                        including: .none
                     )
                 .onChange(of: currentIndex) { _, _ in
                     currentPageZoomScale = 1

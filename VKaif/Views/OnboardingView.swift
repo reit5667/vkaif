@@ -40,7 +40,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.white)
             }
             VStack(spacing: 6) {
-                Text("CleanFeedVK")
+                Text("VKaif")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                 Text("ВКонтакте без лишнего")

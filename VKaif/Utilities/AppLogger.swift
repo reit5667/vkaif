@@ -32,8 +32,8 @@ extension AppLogging {
 final class AppLogger: AppLogging, @unchecked Sendable {
 
     static let shared = AppLogger()
-    private let subsystem = Bundle.main.bundleIdentifier ?? "CleanFeedVK"
-    private let prefix = "[CleanFeedVK]"
+    private let subsystem = Bundle.main.bundleIdentifier ?? "VKaif"
+    private let prefix = "[VKaif]"
 
     #if DEBUG
     private let isVerbose = true

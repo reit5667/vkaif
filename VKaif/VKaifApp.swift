@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct CleanFeedVKApp: App {
+struct VKaifApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

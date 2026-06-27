@@ -2,7 +2,7 @@ import StoreKit
 import Combine
 
 /// ID продукта — нужно создать в App Store Connect с таким же ID.
-let premiumProductID = "com.vsharavin.cleanfeedvk.premium"
+let premiumProductID = "com.vsharavin.vkaif.premium"
 
 @MainActor
 final class StoreKitService: ObservableObject {
