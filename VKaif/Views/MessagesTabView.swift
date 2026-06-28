@@ -12,6 +12,13 @@ struct MessagesTabView: View {
     @State private var totalCount: Int = 0
     @State private var isLoadingMore: Bool = false
     @State private var loadState: LoadState = .idle
+    @State private var searchText: String = ""
+
+    private var filteredItems: [VKConversationItem] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return items }
+        let q = searchText.lowercased()
+        return items.filter { displayTitle(for: $0).lowercased().contains(q) }
+    }
 
     private let vkApi = VKApiService()
     private let pageSize = 50
@@ -42,7 +49,6 @@ struct MessagesTabView: View {
         .navigationTitle("Сообщения")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadConversations() }
-        .refreshable { loadConversations(force: true) }
         .navigationDestination(for: ChatDestination.self) { dest in
             let vm = chatCache.viewModel(for: dest.peerId)
             ChatView(viewModel: vm, title: dest.title, authService: authService)
@@ -51,44 +57,101 @@ struct MessagesTabView: View {
 
     @ViewBuilder
     private var listContent: some View {
-        if items.isEmpty {
-            ContentUnavailableView(
-                "Нет диалогов",
-                systemImage: "bubble.left.and.bubble.right",
-                description: Text("Диалоги появятся здесь.")
-            )
-        } else {
-            List {
-                ForEach(items, id: \.conversation.peer.id) { item in
-                    NavigationLink(value: ChatDestination(peerId: item.conversation.peer.id, title: displayTitle(for: item))) {
-                        HStack(spacing: 12) {
-                            avatarView(url: avatarURL(for: item))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(displayTitle(for: item))
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Text(item.lastMessage.text)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            Text(shortDate(item.lastMessage.date))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(VKTheme.Colors.textSecondary)
+                TextField("Поиск", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(VKTheme.Colors.textSecondary)
                     }
                 }
-                if items.count < totalCount {
-                    ProgressView("Подгрузка диалогов…")
-                        .frame(maxWidth: .infinity)
-                        .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
-                        .onAppear { loadMoreConversations() }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray6))
+            Divider()
+
+            if filteredItems.isEmpty {
+                ContentUnavailableView(
+                    searchText.isEmpty ? "Нет диалогов" : "Ничего не найдено",
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text(searchText.isEmpty ? "Диалоги появятся здесь." : "Попробуйте другой запрос")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredItems, id: \.conversation.peer.id) { item in
+                            NavigationLink(value: ChatDestination(peerId: item.conversation.peer.id, title: displayTitle(for: item))) {
+                                dialogRow(item)
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
+                                .padding(.leading, 72)
+                        }
+                        if items.count < totalCount {
+                            ProgressView("Подгрузка диалогов…")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .onAppear { loadMoreConversations() }
+                        }
+                    }
+                }
+                .background(Color.white)
+                .refreshable { loadConversations(force: true) }
+            }
+        }
+    }
+
+    private func dialogRow(_ item: VKConversationItem) -> some View {
+        let unread = item.conversation.unreadCount ?? 0
+        let isUnread = unread > 0
+        let isOutgoing = item.lastMessage.out == 1
+        let preview = item.lastMessage.text.isEmpty ? "Вложение" : item.lastMessage.text
+
+        return HStack(spacing: 12) {
+            avatarView(url: avatarURL(for: item))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayTitle(for: item))
+                    .font(.system(size: 15, weight: isUnread ? .bold : .semibold))
+                    .foregroundColor(VKTheme.Colors.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 0) {
+                    if isOutgoing {
+                        Text("Вы: ")
+                            .font(VKTheme.TextStyle.dialogPreview)
+                            .foregroundColor(VKTheme.Colors.textSecondary)
+                    }
+                    Text(preview)
+                        .font(VKTheme.TextStyle.dialogPreview)
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                        .lineLimit(1)
                 }
             }
-            .listStyle(.insetGrouped)
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(shortDate(item.lastMessage.date))
+                    .font(.system(size: 13))
+                    .foregroundColor(isUnread ? VKTheme.Colors.badge : VKTheme.Colors.textSecondary)
+                if isUnread {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(VKTheme.Colors.badge)
+                        .clipShape(Capsule())
+                }
+            }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white)
+        .contentShape(Rectangle())
     }
 
     private func displayTitle(for item: VKConversationItem) -> String {
@@ -130,7 +193,7 @@ struct MessagesTabView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 44, height: 44)
+        .frame(width: VKTheme.AvatarSize.dialog, height: VKTheme.AvatarSize.dialog)
         .clipShape(Circle())
     }
 

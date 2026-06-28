@@ -141,23 +141,39 @@ struct ContentView: View {
         case .feed:
             feedSectionView
         case .friends:
-            FriendsTabView(authService: authService)
+            sectionView(FriendsTabView(authService: authService))
         case .messages:
-            MessagesTabView(authService: authService)
+            sectionView(MessagesTabView(authService: authService))
         case .profile:
-            ProfileView(authService: authService, viewModel: profileViewModel)
+            sectionView(ProfileView(authService: authService, viewModel: profileViewModel))
         case .groups:
-            groupsStubView
+            sectionView(groupsSectionView)
         case .search:
-            searchStubView
+            sectionView(searchStubView)
         case .settings:
-            settingsStubView
+            sectionView(settingsStubView)
         }
     }
 
-    private var groupsStubView: some View {
-        ContentUnavailableView("Группы", systemImage: "person.3", description: Text("Раздел в разработке"))
-            .navigationTitle("Группы")
+    /// Применяет синюю шапку VK и кнопку drawer ко всем секциям кроме ленты.
+    private func sectionView<V: View>(_ view: V) -> some View {
+        view
+            .vkBlueNavBar()
+            .toolbar { ToolbarItem(placement: .navigationBarLeading) { feedDrawerButton } }
+    }
+
+    private var groupsSectionView: some View {
+        ProfileGroupsTabView(
+            groups: profileViewModel.groups,
+            loadState: profileViewModel.groupsLoadState,
+            authService: authService,
+            onRefresh: { await profileViewModel.loadGroups(forceRefresh: true) },
+            onLeaveSuccess: { Task { await profileViewModel.loadGroups(forceRefresh: true) } },
+            embeddedInScroll: false
+        )
+        .navigationTitle("Группы")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { Task { await profileViewModel.loadGroups(forceRefresh: false) } }
     }
 
     private var searchStubView: some View {

@@ -230,7 +230,11 @@ struct PostCellView: View {
         .clipped()
         .padding()
         .frame(maxWidth: .infinity, alignment: .center)
-        .background(Color(.systemBackground))
+        .background(VKTheme.Colors.background)
+        .overlay(
+            Rectangle()
+                .strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card)
+        )
     }
 
     @ViewBuilder
@@ -305,17 +309,16 @@ struct PostCellView: View {
     }
 
     private var headerContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             avatarView
-            VStack(alignment: .leading, spacing: 2) {
-                Text(authorName)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Text(displayDateString)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            Spacer(minLength: 0)
+            Text(authorName)
+                .font(VKTheme.TextStyle.postAuthorName)
+                .foregroundColor(VKTheme.Colors.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(displayDateString)
+                .font(VKTheme.TextStyle.timestamp)
+                .foregroundColor(VKTheme.Colors.textSecondary)
             if (canDeletePost && onDelete != nil) || (canPinPost && (onPin != nil || onUnpin != nil)) {
                 Menu {
                     if canPinPost, isPinned, let unpin = onUnpin {
@@ -337,9 +340,8 @@ struct PostCellView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 15))
+                        .foregroundColor(VKTheme.Colors.textSecondary)
                         .symbolRenderingMode(.monochrome)
                 }
                 .disabled(deleteInProgress || pinInProgress)
@@ -358,6 +360,8 @@ struct PostCellView: View {
 
     @ViewBuilder
     private var avatarView: some View {
+        let size = VKTheme.AvatarSize.post
+        let shape = RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare)
         if let urlString = authorAvatarURL, let url = URL(string: urlString) {
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -366,24 +370,26 @@ struct PostCellView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 case .failure:
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .foregroundColor(.secondary)
+                    Rectangle()
+                        .fill(VKTheme.Colors.secondaryBackground)
+                        .overlay(Image(systemName: "person").foregroundColor(VKTheme.Colors.textSecondary))
                 case .empty:
-                    ProgressView()
+                    Rectangle()
+                        .fill(VKTheme.Colors.secondaryBackground)
+                        .overlay(ProgressView())
                 @unknown default:
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .foregroundColor(.secondary)
+                    Rectangle()
+                        .fill(VKTheme.Colors.secondaryBackground)
                 }
             }
-            .frame(width: 44, height: 44)
-            .clipShape(Circle())
+            .frame(width: size, height: size)
+            .clipShape(shape)
         } else {
-            Image(systemName: "person.circle.fill")
-                .resizable()
-                .foregroundColor(.secondary)
-                .frame(width: 44, height: 44)
+            Rectangle()
+                .fill(VKTheme.Colors.secondaryBackground)
+                .overlay(Image(systemName: "person").foregroundColor(VKTheme.Colors.textSecondary))
+                .frame(width: size, height: size)
+                .clipShape(shape)
         }
     }
 
@@ -392,7 +398,8 @@ struct PostCellView: View {
     private var bodyText: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(post.text)
-                .font(.body)
+                .font(VKTheme.TextStyle.postBody)
+                .foregroundColor(VKTheme.Colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(isTextExpanded ? nil : textLineLimitCollapsed)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -403,8 +410,8 @@ struct PostCellView: View {
                         isTextExpanded.toggle()
                     }
                 }
-                .font(.subheadline)
-                .foregroundColor(.accentColor)
+                .font(VKTheme.TextStyle.timestamp)
+                .foregroundColor(VKTheme.Colors.primary)
                 .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -519,7 +526,6 @@ struct PostCellView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(maxHeight: singlePhotoMaxHeight)
-        .cornerRadius(8)
         .onTapGesture {
             guard let idx = item.galleryIndex else { return }
             tokenForGallery = getAccessToken?() ?? authService?.accessToken ?? ""
@@ -562,7 +568,6 @@ struct PostCellView: View {
         .frame(maxWidth: .infinity)
         .frame(height: height)
         .clipped()
-        .cornerRadius(8)
         .onTapGesture {
             guard let idx = item.galleryIndex else { return }
             tokenForGallery = getAccessToken?() ?? authService?.accessToken ?? ""
@@ -620,7 +625,6 @@ struct PostCellView: View {
             .frame(height: 160)
             .frame(maxWidth: .infinity)
             .clipped()
-            .cornerRadius(8)
         }
         .buttonStyle(.plain)
         .disabled(onTapVideo == nil)
@@ -678,8 +682,8 @@ struct PostCellView: View {
                                 .foregroundColor(.secondary)
                         }
                         .padding(10)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                        .background(VKTheme.Colors.secondaryBackground)
+                        .overlay(Rectangle().strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card))
                     }
                     .buttonStyle(.plain)
                 }
@@ -735,8 +739,8 @@ struct PostCellView: View {
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
-                                .cornerRadius(6)
+                                .background(isSelected ? VKTheme.Colors.primary.opacity(0.12) : VKTheme.Colors.secondaryBackground)
+                                .overlay(Rectangle().strokeBorder(isSelected ? VKTheme.Colors.primary.opacity(0.3) : VKTheme.Colors.separator, lineWidth: VKTheme.Border.card))
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     guard canVote else { return }
@@ -759,8 +763,8 @@ struct PostCellView: View {
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
+                .background(VKTheme.Colors.secondaryBackground)
+                .overlay(Rectangle().strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card))
             }
         }
     }
@@ -768,15 +772,15 @@ struct PostCellView: View {
     private var mediaPlaceholder: some View {
         HStack {
             Image(systemName: "doc")
-                .foregroundColor(.secondary)
+                .foregroundColor(VKTheme.Colors.textSecondary)
             Text("Документ")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(VKTheme.TextStyle.timestamp)
+                .foregroundColor(VKTheme.Colors.textSecondary)
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
+        .background(VKTheme.Colors.secondaryBackground)
+        .overlay(Rectangle().strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card))
     }
 
     /// Блок репоста: автор, текст и превью фото из первого элемента copy_history.
@@ -791,26 +795,31 @@ struct PostCellView: View {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image): image.resizable().scaledToFill()
-                        default: Image(systemName: "person.circle.fill").resizable().foregroundStyle(.secondary)
+                        default:
+                            Rectangle()
+                                .fill(VKTheme.Colors.secondaryBackground)
+                                .overlay(Image(systemName: "person").foregroundStyle(VKTheme.Colors.textSecondary))
                         }
                     }
-                    .frame(width: 32, height: 32)
-                    .clipShape(Circle())
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare))
                 } else {
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
+                    Rectangle()
+                        .fill(VKTheme.Colors.secondaryBackground)
+                        .overlay(Image(systemName: "person").foregroundStyle(VKTheme.Colors.textSecondary))
+                        .frame(width: 28, height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare))
                 }
-                Text("Репост от \(repostAuthorName)")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                Text(repostAuthorName)
+                    .font(VKTheme.TextStyle.timestamp)
+                    .fontWeight(.semibold)
+                    .foregroundColor(VKTheme.Colors.primary)
                 Spacer(minLength: 0)
             }
             if !repost.text.isEmpty {
                 Text(repost.text)
-                    .font(.subheadline)
+                    .font(VKTheme.TextStyle.postBody)
+                    .foregroundColor(VKTheme.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -825,21 +834,21 @@ struct PostCellView: View {
                                     switch phase {
                                     case .success(let image): image.resizable().scaledToFill()
                                     case .failure:
-                                        Color(.systemGray5)
-                                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
-                                    case .empty: Color(.systemGray6).overlay { ProgressView() }
-                                    @unknown default: Color(.systemGray5)
+                                        Color(VKTheme.Colors.secondaryBackground)
+                                            .overlay { Image(systemName: "photo").foregroundStyle(VKTheme.Colors.textSecondary) }
+                                    case .empty:
+                                        Color(VKTheme.Colors.secondaryBackground).overlay { ProgressView() }
+                                    @unknown default: Color(VKTheme.Colors.secondaryBackground)
                                     }
                                 }
                                 .id(urlString)
                             } else {
-                                Color(.systemGray5)
-                                    .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                                Color(VKTheme.Colors.secondaryBackground)
+                                    .overlay { Image(systemName: "photo").foregroundStyle(VKTheme.Colors.textSecondary) }
                             }
                         }
                         .frame(height: 80)
                         .clipped()
-                        .cornerRadius(4)
                         .onTapGesture {
                             repostFullScreenPhotoIndex = index
                         }
@@ -849,8 +858,8 @@ struct PostCellView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
+        .background(VKTheme.Colors.secondaryBackground)
+        .overlay(Rectangle().strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card))
     }
 
     // MARK: - Лайки / комментарии (счётчики)
@@ -876,28 +885,28 @@ struct PostCellView: View {
                             "\(displayLikesCount)",
                             systemImage: displayIsLiked ? "heart.fill" : "heart"
                         )
-                        .font(.caption)
-                        .foregroundColor(displayIsLiked ? .red : .secondary)
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(displayIsLiked ? .red : VKTheme.Colors.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .disabled(likeInProgress)
                 } else {
                     Label("\(displayLikesCount)", systemImage: "heart.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(VKTheme.Colors.textSecondary)
                 }
             }
             if onTapComments != nil {
                 Button(action: { onTapComments?() }) {
-                    Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Label("\(post.commentsCount)", systemImage: "bubble.right")
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(VKTheme.Colors.textSecondary)
                 }
                 .buttonStyle(.plain)
             } else if post.commentsCount > 0 {
-                Label("\(post.commentsCount)", systemImage: "bubble.right.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Label("\(post.commentsCount)", systemImage: "bubble.right")
+                    .font(VKTheme.TextStyle.timestamp)
+                    .foregroundColor(VKTheme.Colors.textSecondary)
             }
             if displayRepostsCount > 0 || onRepostToWall != nil {
                 if let toWall = onRepostToWall {
@@ -912,16 +921,16 @@ struct PostCellView: View {
                             }
                         }
                     } label: {
-                        Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right.fill")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right")
+                            .font(VKTheme.TextStyle.timestamp)
+                            .foregroundColor(VKTheme.Colors.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .disabled(repostInProgress)
                 } else {
-                    Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Label("\(displayRepostsCount)", systemImage: "arrowshape.turn.up.right")
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(VKTheme.Colors.textSecondary)
                 }
             }
         }

@@ -41,10 +41,22 @@ struct FriendsTabView: View {
             .onChange(of: segment) { _, _ in loadSegment() }
 
             if segment == .all {
-                TextField("Поиск по имени", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal)
-                    .padding(.bottom, 4)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Поиск", text: $searchText)
+                        .textFieldStyle(.plain)
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color(.systemGray6))
+                .padding(.horizontal)
+                .padding(.bottom, 4)
             }
 
             Group {
@@ -82,18 +94,25 @@ struct FriendsTabView: View {
                 systemImage: segment == .suggestions ? "person.2" : "person.badge.plus"
             )
         } else {
-            List {
-                ForEach(filtered, id: \.userId) { item in
-                    NavigationLink(value: item.userId) {
-                        HStack(spacing: 12) {
-                            avatarView(url: item.photoURL)
-                            Text(item.name)
-                                .font(.body)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(filtered, id: \.userId) { item in
+                        NavigationLink(value: item.userId) {
+                            HStack(spacing: 12) {
+                                avatarView(url: item.photoURL)
+                                Text(item.name)
+                                    .font(.body)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 16)
                         }
+                        .buttonStyle(.plain)
+                        Divider()
+                            .padding(.leading, 44 + 12 + 16)
                     }
                 }
             }
-            .listStyle(.insetGrouped)
         }
     }
 
@@ -143,7 +162,7 @@ struct FriendsTabView: View {
             }
         }
         .frame(width: 44, height: 44)
-        .clipShape(Circle())
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func loadSegment(force: Bool = false) {

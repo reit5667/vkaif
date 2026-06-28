@@ -65,6 +65,7 @@ struct ProfileView: View {
         }
         .navigationTitle(viewModel.user?.displayName ?? "Профиль")
         .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if case .loaded = viewModel.userLoadState {

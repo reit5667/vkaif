@@ -65,6 +65,7 @@ struct GroupWallView: View {
         }
         .navigationTitle(group?.name ?? "Группа")
         .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
         .toolbar {
             if case .loaded = loadState {
                 ToolbarItem(placement: .topBarTrailing) {

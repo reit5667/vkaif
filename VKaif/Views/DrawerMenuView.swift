@@ -8,8 +8,14 @@ struct DrawerMenuView: View {
     @Binding var isOpen: Bool
     let unreadMessagesCount: Int
 
+    @State private var searchText = ""
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            searchBar
+                .padding(.top, 56)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             profileBlock
             Divider()
                 .overlay(Color.white.opacity(0.15))
@@ -22,48 +28,63 @@ struct DrawerMenuView: View {
         .onAppear { profileViewModel.loadProfileIfNeeded() }
     }
 
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.white.opacity(0.55))
+                .font(.system(size: 14))
+            TextField("Поиск", text: $searchText)
+                .font(.system(size: 15))
+                .foregroundColor(.white)
+                .tint(.white)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private var profileBlock: some View {
         HStack(spacing: 12) {
             avatarView
-            VStack(alignment: .leading, spacing: 3) {
-                Text(profileViewModel.user?.displayName ?? "")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                if let uid = profileViewModel.user?.id {
-                    Text("id\(uid)")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.55))
-                }
-            }
+            Text(profileViewModel.user?.displayName ?? "")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 56)
-        .padding(.bottom, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            activeSection = .profile
+            withAnimation(.spring(duration: 0.28)) { isOpen = false }
+        }
     }
 
     @ViewBuilder
     private var avatarView: some View {
-        let size: CGFloat = 52
+        let size: CGFloat = 44
         if let urlStr = profileViewModel.user?.avatarURL, let url = URL(string: urlStr) {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img):
                     img.resizable().aspectRatio(contentMode: .fill)
                 default:
-                    Circle().fill(Color.white.opacity(0.25))
+                    Color.white.opacity(0.25)
                 }
             }
             .frame(width: size, height: size)
-            .clipShape(Circle())
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
-            Circle()
+            RoundedRectangle(cornerRadius: 4)
                 .fill(Color.white.opacity(0.2))
                 .frame(width: size, height: size)
                 .overlay(
                     Image(systemName: "person.fill")
                         .foregroundColor(.white.opacity(0.5))
-                        .font(.system(size: 22))
+                        .font(.system(size: 20))
                 )
         }
     }
@@ -71,12 +92,23 @@ struct DrawerMenuView: View {
     private var menuItems: some View {
         VStack(alignment: .leading, spacing: 0) {
             DrawerItem(icon: "house.fill",       title: "Лента",       section: .feed,     activeSection: $activeSection, isOpen: $isOpen)
+            drawerDivider
             DrawerItem(icon: "person.2.fill",    title: "Друзья",      section: .friends,  activeSection: $activeSection, isOpen: $isOpen)
+            drawerDivider
             DrawerItem(icon: "message.fill",     title: "Сообщения",   section: .messages, activeSection: $activeSection, isOpen: $isOpen, badge: unreadMessagesCount)
+            drawerDivider
             DrawerItem(icon: "person.3.fill",    title: "Группы",      section: .groups,   activeSection: $activeSection, isOpen: $isOpen)
+            drawerDivider
             DrawerItem(icon: "magnifyingglass",  title: "Поиск",       section: .search,   activeSection: $activeSection, isOpen: $isOpen)
+            drawerDivider
             DrawerItem(icon: "gearshape.fill",   title: "Настройки",   section: .settings, activeSection: $activeSection, isOpen: $isOpen)
         }
+    }
+
+    private var drawerDivider: some View {
+        Divider()
+            .overlay(Color.white.opacity(0.1))
+            .padding(.leading, 16)
     }
 }
 

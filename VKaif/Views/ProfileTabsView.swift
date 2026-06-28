@@ -494,25 +494,35 @@ struct ProfileFriendsTabView: View {
                         ProfileViewWrapper(authService: authService, userId: friendId)
                     }
                 } else {
-                    List {
-                        Section {
-                            searchRow
-                                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                                .listRowBackground(Color(.systemGray6))
-                        }
-                        Section {
-                            ForEach(filteredFriends, id: \.id) { friend in
-                                NavigationLink(value: friend.id) {
-                                    HStack(spacing: 12) {
-                                        friendAvatar(friend)
-                                        Text(friend.displayName)
-                                            .font(.body)
+                    VStack(spacing: 0) {
+                        searchRow
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color(.systemGray6))
+                        Divider()
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filteredFriends, id: \.id) { friend in
+                                    NavigationLink(value: friend.id) {
+                                        HStack(spacing: 12) {
+                                            friendAvatar(friend)
+                                            Text(friend.displayName)
+                                                .font(.body)
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 12)
                                     }
+                                    .buttonStyle(.plain)
+                                    Divider()
+                                        .padding(.leading, 44 + 12)
                                 }
                             }
                         }
+                        .refreshable { await onRefresh() }
                     }
-                    .listStyle(.insetGrouped)
+                    .frame(maxHeight: .infinity)
                     .navigationDestination(for: Int.self) { friendId in
                         ProfileViewWrapper(authService: authService, userId: friendId)
                     }
@@ -545,7 +555,7 @@ struct ProfileFriendsTabView: View {
             }
         }
         .frame(width: 44, height: 44)
-        .clipShape(Circle())
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 
@@ -615,25 +625,27 @@ struct ProfileGroupsTabView: View {
                         GroupWallView(authService: authService, groupId: dest.groupId, onLeaveSuccess: onLeaveSuccess)
                     }
                 } else {
-                    List {
-                        Section {
-                            searchRow
-                                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                                .listRowBackground(Color(.systemGray6))
-                        }
-                        Section {
-                            ForEach(filteredGroups, id: \.id) { group in
-                                NavigationLink(value: GroupDestination(groupId: group.id)) {
-                                    HStack(spacing: 12) {
-                                        groupAvatar(group)
-                                        Text(group.name ?? "Группа \(group.id)")
-                                            .font(.body)
+                    VStack(spacing: 0) {
+                        searchRow
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color(.systemGray6))
+                        Divider()
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filteredGroups, id: \.id) { group in
+                                    NavigationLink(value: GroupDestination(groupId: group.id)) {
+                                        groupRow(group)
                                     }
+                                    .buttonStyle(.plain)
+                                    Divider()
+                                        .padding(.leading, 72)
                                 }
                             }
                         }
+                        .background(Color.white)
+                        .refreshable { await onRefresh() }
                     }
-                    .listStyle(.insetGrouped)
                     .frame(maxHeight: .infinity)
                     .navigationDestination(for: GroupDestination.self) { dest in
                         GroupWallView(authService: authService, groupId: dest.groupId, onLeaveSuccess: onLeaveSuccess)
@@ -648,6 +660,21 @@ struct ProfileGroupsTabView: View {
             }
         }
         .refreshable { await onRefresh() }
+    }
+
+    private func groupRow(_ group: VKGroup) -> some View {
+        HStack(spacing: 12) {
+            groupAvatar(group)
+            Text(group.name ?? "Группа \(group.id)")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(VKTheme.Colors.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white)
+        .contentShape(Rectangle())
     }
 
     private func groupAvatar(_ group: VKGroup) -> some View {
@@ -666,8 +693,8 @@ struct ProfileGroupsTabView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 44, height: 44)
-        .clipShape(Circle())
+        .frame(width: VKTheme.AvatarSize.dialog, height: VKTheme.AvatarSize.dialog)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

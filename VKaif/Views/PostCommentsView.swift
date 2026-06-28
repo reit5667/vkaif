@@ -88,6 +88,7 @@ struct PostCommentsView: View {
             }
             .navigationTitle("Комментарии")
             .navigationBarTitleDisplayMode(.inline)
+            .vkBlueNavBar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -130,61 +131,93 @@ struct PostCommentsView: View {
     }
 
     private var commentsList: some View {
-        List {
-            ForEach(items, id: \.id) { comment in
-                commentRow(comment)
-                if let threadItems = comment.thread?.items, !threadItems.isEmpty {
-                    ForEach(threadItems, id: \.id) { reply in
-                        commentRow(reply)
-                            .padding(.leading, 12)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(items, id: \.id) { comment in
+                    commentRow(comment)
+                    Divider().padding(.leading, 16 + 36 + 10)
+                    if let threadItems = comment.thread?.items, !threadItems.isEmpty {
+                        ForEach(threadItems, id: \.id) { reply in
+                            commentRow(reply)
+                                .padding(.leading, 36)
+                            Divider().padding(.leading, 36 + 16 + 36 + 10)
+                        }
                     }
                 }
-            }
-            if !items.isEmpty && items.count < totalFromApi && totalFromApi > 5 && !noMoreTopLevel {
-                Section {
+                if !items.isEmpty && items.count < totalFromApi && totalFromApi > 5 && !noMoreTopLevel {
                     Button {
                         loadMore()
                     } label: {
                         HStack {
-                            if loadMoreLoading {
-                                ProgressView()
-                                    .scaleEffect(0.9)
-                            }
+                            if loadMoreLoading { ProgressView().scaleEffect(0.9) }
                             Text(loadMoreLoading ? "Загрузка…" : "Подгрузить ещё")
                         }
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                     }
+                    .foregroundStyle(VKTheme.Colors.primary)
                     .disabled(loadMoreLoading)
+                    Divider()
                 }
             }
         }
     }
 
     private func commentRow(_ comment: VKComment) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 10) {
+            commentAvatar(comment)
+            VStack(alignment: .leading, spacing: 3) {
                 authorLink(comment)
-                Text(relativeDateString(from: comment.date))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            if !comment.text.isEmpty {
-                Text(comment.text)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack(spacing: 12) {
-                likeButton(comment)
-                Button("Ответить") {
-                    addCommentTarget = .reply(comment)
-                    replyText = ""
-                    replyError = nil
+                if !comment.text.isEmpty {
+                    Text(comment.text)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.caption)
-                .foregroundColor(.accentColor)
+                HStack(spacing: 12) {
+                    Text(relativeDateString(from: comment.date))
+                        .font(.caption)
+                        .foregroundStyle(VKTheme.Colors.textSecondary)
+                    likeButton(comment)
+                    Button("Ответить") {
+                        addCommentTarget = .reply(comment)
+                        replyText = ""
+                        replyError = nil
+                    }
+                    .font(.caption)
+                    .foregroundStyle(VKTheme.Colors.primary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func commentAvatar(_ comment: VKComment) -> some View {
+        let url: URL? = {
+            if comment.fromId > 0 {
+                return profiles.first(where: { $0.id == comment.fromId })?.photo50.flatMap { URL(string: $0) }
+            } else {
+                let gid = abs(comment.fromId)
+                return groups.first(where: { $0.id == gid })?.photo50.flatMap { URL(string: $0) }
+            }
+        }()
+        return Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: Image(systemName: "person.fill").resizable().foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Image(systemName: "person.fill")
+                    .resizable()
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .frame(width: 36, height: 36)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     /// Только тап по имени открывает профиль/группу; не реагируем на тап по строке/«Ответить».
@@ -298,8 +331,11 @@ struct PostCommentsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 TextField(isReply ? "Текст ответа" : "Текст комментария", text: $replyText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .lineLimit(3...6)
+                    .padding(10)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 if let err = replyError {
                     Text(err)
                         .font(.caption)
@@ -310,6 +346,7 @@ struct PostCommentsView: View {
             .padding()
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .vkBlueNavBar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Отмена") {

@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var showForwardStub = false
     @State private var showAttachMenu = false
     @State private var showPhotosPicker = false
+    @State private var searchText: String = ""
+    @State private var isSearchActive = false
     @State private var galleryPhotos: [VKPhoto] = []
     @State private var galleryIndex: Int = 0
     @State private var showGallery = false
@@ -46,6 +48,15 @@ struct ChatView: View {
 
     private var peerId: Int { viewModel.peerId }
 
+    private var chatAvatarURL: URL? {
+        if peerId > 0 && peerId < 2_000_000_000 {
+            return viewModel.profiles.first(where: { $0.id == peerId })?.photo50.flatMap { URL(string: $0) }
+        } else if peerId < 0 {
+            return viewModel.groups.first(where: { -$0.id == peerId })?.photo50.flatMap { URL(string: $0) }
+        }
+        return nil
+    }
+
     private var chatTitle: String {
         if let t = title, !t.isEmpty { return t }
         if peerId >= 200_000_0000 { return "Беседа" }
@@ -62,6 +73,9 @@ struct ChatView: View {
             if let pinned = viewModel.pinnedMessage {
                 pinnedBanner(pinned)
             }
+            if isSearchActive {
+                searchBar
+            }
             if let err = sendError {
                 Text(err)
                     .font(.caption)
@@ -72,16 +86,47 @@ struct ChatView: View {
             if let reply = replyToMessage {
                 replyBanner(reply)
             }
-            inputBar
+            if !isSearchActive {
+                inputBar
+            }
         }
+        .background(VKTheme.Colors.chatBackground.ignoresSafeArea())
         .navigationTitle(chatTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    if let url = chatAvatarURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill()
+                            default: Image(systemName: "person.circle.fill").resizable().foregroundStyle(.white.opacity(0.7))
+                            }
+                        }
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                    }
+                    Text(chatTitle)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showMaterials = true
-                } label: {
-                    Image(systemName: "photo.on.rectangle.angled")
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation { isSearchActive.toggle() }
+                        if !isSearchActive { searchText = "" }
+                    } label: {
+                        Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
+                            .foregroundColor(.white)
+                    }
+                    Button {
+                        showMaterials = true
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .foregroundColor(.white)
+                    }
                 }
             }
         }
@@ -137,6 +182,32 @@ struct ChatView: View {
         }
     }
 
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(VKTheme.Colors.textSecondary)
+            TextField("Поиск в диалоге", text: $searchText)
+                .textFieldStyle(.plain)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray6))
+    }
+
+    private var filteredMessages: [VKMessage] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return viewModel.messages
+        }
+        let q = searchText.lowercased()
+        return viewModel.messages.filter { $0.text.lowercased().contains(q) }
+    }
+
     private var messagesList: some View {
         Group {
             switch viewModel.loadState {
@@ -153,7 +224,7 @@ struct ChatView: View {
                 } else {
                     ScrollViewReader { proxy in
                         List {
-                            if viewModel.messages.count < viewModel.totalCount {
+                            if viewModel.messages.count < viewModel.totalCount && !isSearchActive {
                                 ProgressView("Загрузка старых сообщений…")
                                     .frame(maxWidth: .infinity)
                                     .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
@@ -162,12 +233,19 @@ struct ChatView: View {
                                         viewModel.loadMoreHistory(token: token)
                                     }
                             }
-                            ForEach(viewModel.messages, id: \.id) { msg in
+                            ForEach(Array(filteredMessages.enumerated()), id: \.element.id) { index, msg in
+                                let showDate = index == 0 || !Calendar.current.isDate(filteredMessages[index - 1].date, inSameDayAs: msg.date)
+                                if showDate {
+                                    dateSeparator(msg.date)
+                                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                }
                                 messageRow(msg)
                                     .id(msg.id)
                                     .background(
                                         highlightedMessageId == msg.id
-                                            ? Color.accentColor.opacity(0.15)
+                                            ? VKTheme.Colors.incomingBubble.opacity(0.5)
                                             : Color.clear
                                     )
                                     .animation(.easeOut(duration: 0.4), value: highlightedMessageId)
@@ -210,6 +288,25 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func dateSeparator(_ date: Date) -> some View {
+        Text(dateHeaderString(date))
+            .font(.system(size: 13))
+            .foregroundColor(VKTheme.Colors.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+    }
+
+    private func dateHeaderString(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Сегодня" }
+        if cal.isDateInYesterday(date) { return "Вчера" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        let components = cal.dateComponents([.year], from: date, to: Date())
+        f.dateFormat = (components.year ?? 0) > 0 ? "d MMMM yyyy" : "d MMMM"
+        return f.string(from: date)
+    }
+
     private func messageRow(_ msg: VKMessage) -> some View {
         let isOut = (msg.out ?? 0) == 1
         let deleting = viewModel.deleteInProgress.contains(msg.id)
@@ -235,7 +332,7 @@ struct ChatView: View {
                             Text(msg.text)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                                .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         ForEach(Array(videos.enumerated()), id: \.offset) { _, video in
@@ -250,7 +347,7 @@ struct ChatView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: isOut ? .trailing : .leading)
-                                .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
+                                .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         ForEach(Array(wallPosts.enumerated()), id: \.offset) { _, post in
@@ -296,8 +393,12 @@ struct ChatView: View {
                         }
                     }
                     .padding(.vertical, msg.text.isEmpty && msg.replyMessage == nil && !photos.isEmpty ? 0 : 0)
-                    .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+                    .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.bubble))
+                    .overlay(
+                        isOut ? RoundedRectangle(cornerRadius: VKTheme.Radius.bubble)
+                            .strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card) : nil
+                    )
                     .opacity(deleting ? 0.5 : 1.0)
                 }
                 Text(shortTime(msg.date))
@@ -454,8 +555,8 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(isOut ? Color.accentColor.opacity(0.2) : Color(.systemGray5))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+        .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.bubble))
     }
 
     private func toggleAudio(_ audio: VKAudioMessage, msgId: Int) {
@@ -638,7 +739,7 @@ struct ChatView: View {
             Text(author)
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(VKTheme.Colors.primary)
             if !post.text.isEmpty {
                 Text(post.text)
                     .font(.subheadline)
@@ -675,7 +776,7 @@ struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+                .strokeBorder(VKTheme.Colors.primary.opacity(0.4), lineWidth: 1)
         )
     }
 
@@ -776,54 +877,66 @@ struct ChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                showAttachMenu = true
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title)
-            }
-            .disabled(sending)
-            .sheet(isPresented: $showAttachMenu) {
-                attachMenu
-                    .presentationDetents([.height(120)])
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 10) {
+                Button {
+                    showAttachMenu = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 20))
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                }
+                .disabled(sending)
+                .sheet(isPresented: $showAttachMenu) {
+                    attachMenu
+                        .presentationDetents([.height(120)])
+                        .presentationDragIndicator(.visible)
+                }
+
+                TextField("Ваше сообщение...", text: $inputText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .lineLimit(1...5)
+
+                Button {
+                    showStickerPicker = true
+                } label: {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 20))
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                }
+                .disabled(sending)
+                .sheet(isPresented: $showStickerPicker) {
+                    StickerPickerView(authService: authService) { stickerId in
+                        Task { await sendSticker(stickerId) }
+                    }
+                    .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
-            }
-
-            Button {
-                showStickerPicker = true
-            } label: {
-                Image(systemName: "face.smiling")
-                    .font(.title)
-            }
-            .disabled(sending)
-            .sheet(isPresented: $showStickerPicker) {
-                StickerPickerView(authService: authService) { stickerId in
-                    Task { await sendSticker(stickerId) }
                 }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
 
-            TextField("Сообщение", text: $inputText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...5)
-            Button {
-                sendMessage()
-            } label: {
-                if sending {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title)
+                let canSend = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
+                Button {
+                    sendMessage()
+                } label: {
+                    if sending {
+                        ProgressView()
+                            .frame(width: 32, height: 32)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
+                            .background(canSend ? VKTheme.Colors.primary : VKTheme.Colors.textSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.button))
+                    }
                 }
+                .disabled(!canSend)
             }
-            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
     }
 
     private var attachMenu: some View {

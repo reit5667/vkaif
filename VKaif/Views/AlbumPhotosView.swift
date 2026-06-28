@@ -150,6 +150,7 @@ struct AlbumPhotosView: View {
         }
         .navigationTitle(albumTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

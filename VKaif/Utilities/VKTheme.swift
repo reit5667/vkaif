@@ -31,6 +31,8 @@ enum VKTheme {
         static let badge = Color(hex: "#E64646")
         /// Индикатор онлайн
         static let online = Color(hex: "#4BB34B")
+        /// Фон экрана чата (классический VK — голубовато-серый)
+        static let chatBackground = Color(hex: "#D5DDE5")
     }
 
     // MARK: Geometry
@@ -78,6 +80,19 @@ enum VKTheme {
         static let sectionHeader   = Font.system(size: 13, weight: .semibold)
     }
 }
+
+// MARK: - Blue navigation bar style
+
+#if os(iOS)
+extension View {
+    func vkBlueNavBar() -> some View {
+        self
+            .toolbarBackground(VKTheme.Colors.primary, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+    }
+}
+#endif
 
 // MARK: - Color hex initializer
 
