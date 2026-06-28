@@ -1290,6 +1290,23 @@ final class VKApiService: Sendable {
         return first
     }
 
+    // MARK: - account.getCounters
+
+    func getAccountCounters(token: String) async throws -> AccountCounters {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "filter", value: "messages")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/account.getCounters") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        return try await requestVK(AccountCounters.self, from: request)
+    }
+
     // MARK: - audio.get
 
     func getAudio(token: String, ownerId: Int, offset: Int = 0, count: Int = 100) async throws -> AudioGetResponse {

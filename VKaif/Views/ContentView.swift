@@ -55,52 +55,136 @@ struct ContentView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Текущий активный раздел приложения (drawer-навигация)
+    @State private var activeSection: AppSection = .feed
+    /// Состояние бокового меню
+    @State private var isDrawerOpen = false
+    /// Количество непрочитанных сообщений для бейджа в drawer
+    @State private var unreadMessagesCount = 0
+
     var body: some View {
-        NavigationView {
-            Group {
-                if case .authenticated = authService.state {
-                    TabView {
-                        NavigationStack {
-                            feedTabContent
-                        }
-                        .tabItem { Label("Лента", systemImage: "list.bullet.rectangle") }
-                        NavigationStack {
-                            FriendsTabView(authService: authService)
-                        }
-                        .tabItem { Label("Друзья", systemImage: "person.2") }
-                        NavigationStack {
-                            MessagesTabView(authService: authService)
-                        }
-                        .tabItem { Label("Сообщения", systemImage: "bubble.left.and.bubble.right") }
-                        NavigationStack {
-                            ProfileView(authService: authService, viewModel: profileViewModel)
-                        }
-                        .tabItem { Label("Профиль", systemImage: "person.circle") }
+        Group {
+            if case .authenticated = authService.state {
+                ZStack(alignment: .leading) {
+                    NavigationStack {
+                        mainAppContent
                     }
+                    .preferredColorScheme(.light)
+                    .disabled(isDrawerOpen)
+
+                    if isDrawerOpen {
+                        Color.black.opacity(0.45)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation(.spring(duration: 0.28)) { isDrawerOpen = false }
+                            }
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onEnded { v in
+                                        if v.translation.width < -40 {
+                                            withAnimation(.spring(duration: 0.28)) { isDrawerOpen = false }
+                                        }
+                                    }
+                            )
+                    }
+
+                    DrawerMenuView(
+                        profileViewModel: profileViewModel,
+                        activeSection: $activeSection,
+                        isOpen: $isDrawerOpen,
+                        unreadMessagesCount: unreadMessagesCount
+                    )
+                    .frame(width: drawerWidth)
+                    .offset(x: isDrawerOpen ? 0 : -drawerWidth)
+                    .animation(.spring(duration: 0.28), value: isDrawerOpen)
+
+                    if !isDrawerOpen {
+                        Color.clear
+                            .frame(width: 20)
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 10, coordinateSpace: .global)
+                                    .onEnded { v in
+                                        if v.translation.width > 30 && v.startLocation.x < 30 {
+                                            withAnimation(.spring(duration: 0.28)) { isDrawerOpen = true }
+                                        }
+                                    }
+                            )
+                    }
+                }
+            } else {
+                if hasCompletedOnboarding {
+                    mainContentStack
                 } else {
-                    if hasCompletedOnboarding {
-                        mainContentStack
-                    } else {
-                        OnboardingView(authService: authService)
-                    }
+                    OnboardingView(authService: authService)
                 }
             }
-            .sheet(isPresented: $showAuthView) {
-                AuthView(authService: authService)
-            }
-            .onChange(of: authService.state) { _, state in
-                if case .authenticated = state { hasCompletedOnboarding = true }
-            }
-            .onChange(of: scenePhase) { _, new in
-                if new == .active, case .authenticated = authService.state {
-                    let stale = lastFeedLoadDate.map { Date().timeIntervalSince($0) > 600 } ?? true
-                    if stale { loadFeed() }
-                }
+        }
+        .sheet(isPresented: $showAuthView) {
+            AuthView(authService: authService)
+        }
+        .onChange(of: authService.state) { _, state in
+            if case .authenticated = state { hasCompletedOnboarding = true }
+        }
+        .onChange(of: scenePhase) { _, new in
+            if new == .active, case .authenticated = authService.state {
+                let stale = lastFeedLoadDate.map { Date().timeIntervalSince($0) > 600 } ?? true
+                if stale { loadFeed() }
             }
         }
     }
 
-    private var feedTabContent: some View {
+    @ViewBuilder
+    private var mainAppContent: some View {
+        switch activeSection {
+        case .feed:
+            feedSectionView
+        case .friends:
+            FriendsTabView(authService: authService)
+        case .messages:
+            MessagesTabView(authService: authService)
+        case .profile:
+            ProfileView(authService: authService, viewModel: profileViewModel)
+        case .groups:
+            groupsStubView
+        case .search:
+            searchStubView
+        case .settings:
+            settingsStubView
+        }
+    }
+
+    private var groupsStubView: some View {
+        ContentUnavailableView("Группы", systemImage: "person.3", description: Text("Раздел в разработке"))
+            .navigationTitle("Группы")
+    }
+
+    private var searchStubView: some View {
+        ContentUnavailableView("Поиск", systemImage: "magnifyingglass", description: Text("Раздел в разработке"))
+            .navigationTitle("Поиск")
+    }
+
+    private var settingsStubView: some View {
+        List {
+            Section {
+                Button(role: .destructive) {
+                    authService.logout()
+                    feedPosts = []
+                    feedProfiles = []
+                    feedGroups = []
+                    nextFrom = nil
+                    currentUserId = nil
+                    activeSection = .feed
+                } label: {
+                    Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
+        }
+        .navigationTitle("Настройки")
+    }
+
+    private var feedSectionView: some View {
         Group {
             if !feedPosts.isEmpty {
                 feedListView
@@ -108,35 +192,40 @@ struct ContentView: View {
                 mainContentStack
             }
         }
-        .navigationTitle("Главная")
+        .navigationTitle("Новости")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(VKTheme.Colors.primary, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                feedDrawerButton
+            }
+        }
         .onAppear {
             if case .authenticated = authService.state, case .idle = feedLoadState {
                 loadFeed()
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Обновить") {
-                    feedScrollToTopTrigger += 1
-                    loadFeed()
-                }
-                .disabled(feedLoadState.isLoading)
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Выйти") {
-                    authService.logout()
-                    feedPosts = []
-                    feedProfiles = []
-                    feedGroups = []
-                    nextFrom = nil
-                    postLikeOverrides = [:]
-                    postLikedOverrides = [:]
-                    postRepostOverrides = [:]
-                    repostInProgress = []
-                    pollVoteOverrides = [:]
-                    pollVoteInProgress = []
-                    currentUserId = nil
-                    deleteInProgress = []
+    }
+
+    private var feedDrawerButton: some View {
+        Button {
+            withAnimation(.spring(duration: 0.28)) { isDrawerOpen = true }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.white)
+                if unreadMessagesCount > 0 {
+                    Text(unreadMessagesCount > 99 ? "99+" : "\(unreadMessagesCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(VKTheme.Colors.badge)
+                        .clipShape(Capsule())
+                        .offset(x: 10, y: -8)
                 }
             }
         }
@@ -534,6 +623,9 @@ struct ContentView: View {
                     feedLoadState = .loaded(count: enriched.count)
                     lastFeedLoadDate = Date()
                 }
+                if let counters = try? await vkApi.getAccountCounters(token: token) {
+                    await MainActor.run { unreadMessagesCount = counters.messages ?? 0 }
+                }
                 printFeedToConsole(posts: enriched, nextFrom: response.nextFrom)
             } catch {
                 await MainActor.run {
@@ -797,17 +889,10 @@ enum FeedLoadState {
     }
 }
 
-// MARK: - Заглушки табов «Друзья» и «Сообщения»
+// MARK: - Разделы приложения (drawer-навигация)
 
-private struct FriendsStubView: View {
-    var body: some View {
-        ContentUnavailableView(
-            "Друзья",
-            systemImage: "person.2",
-            description: Text("Раздел в разработке. Список друзей доступен во вкладке «Профиль».")
-        )
-        .navigationTitle("Друзья")
-    }
+enum AppSection {
+    case feed, friends, messages, profile, groups, search, settings
 }
 
 #Preview {

@@ -1138,3 +1138,13 @@ struct VKStickerPackItem: Decodable, Identifiable {
             ?? images?.max(by: { $0.width < $1.width })?.url
     }
 }
+
+// MARK: - account.getCounters
+
+struct AccountCounters: Decodable {
+    let messages: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case messages
+    }
+}
