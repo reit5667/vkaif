@@ -9,6 +9,8 @@ struct FullScreenImageView: View {
     var onTap: (() -> Void)? = nil
     var onScaleChange: ((CGFloat) -> Void)? = nil
     var onSwipeDown: (() -> Void)? = nil
+    var onSwipeLeft: (() -> Void)? = nil
+    var onSwipeRight: (() -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
 
@@ -23,7 +25,9 @@ struct FullScreenImageView: View {
                         scale = newScale
                         onScaleChange?(newScale)
                     },
-                    onSwipeDown: onSwipeDown
+                    onSwipeDown: onSwipeDown,
+                    onSwipeLeft: onSwipeLeft,
+                    onSwipeRight: onSwipeRight
                 )
                 .onAppear { onScaleChange?(1.0) }
             } else {
@@ -43,9 +47,11 @@ private struct ZoomableScrollView: UIViewRepresentable {
     let onSingleTap: () -> Void
     let onScaleChange: ((CGFloat) -> Void)?
     let onSwipeDown: (() -> Void)?
+    var onSwipeLeft: (() -> Void)? = nil
+    var onSwipeRight: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSingleTap: onSingleTap, onScaleChange: onScaleChange, onSwipeDown: onSwipeDown)
+        Coordinator(onSingleTap: onSingleTap, onScaleChange: onScaleChange, onSwipeDown: onSwipeDown, onSwipeLeft: onSwipeLeft, onSwipeRight: onSwipeRight)
     }
 
     func makeUIView(context: Context) -> ZoomScrollView {
@@ -71,7 +77,7 @@ private struct ZoomableScrollView: UIViewRepresentable {
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
 
-        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap))
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
         singleTap.numberOfTapsRequired = 1
         singleTap.require(toFail: doubleTap)
         scrollView.addGestureRecognizer(singleTap)
@@ -85,6 +91,8 @@ private struct ZoomableScrollView: UIViewRepresentable {
         context.coordinator.onSingleTap = onSingleTap
         context.coordinator.onScaleChange = onScaleChange
         context.coordinator.onSwipeDown = onSwipeDown
+        context.coordinator.onSwipeLeft = onSwipeLeft
+        context.coordinator.onSwipeRight = onSwipeRight
         if context.coordinator.currentURL != url {
             context.coordinator.currentURL = url
             context.coordinator.loadImage(url: url)
@@ -95,14 +103,18 @@ private struct ZoomableScrollView: UIViewRepresentable {
         var onSingleTap: () -> Void
         var onScaleChange: ((CGFloat) -> Void)?
         var onSwipeDown: (() -> Void)?
+        var onSwipeLeft: (() -> Void)?
+        var onSwipeRight: (() -> Void)?
         var currentURL: URL?
         weak var imageView: UIImageView?
         weak var scrollView: ZoomScrollView?
 
-        init(onSingleTap: @escaping () -> Void, onScaleChange: ((CGFloat) -> Void)?, onSwipeDown: (() -> Void)?) {
+        init(onSingleTap: @escaping () -> Void, onScaleChange: ((CGFloat) -> Void)?, onSwipeDown: (() -> Void)?, onSwipeLeft: (() -> Void)? = nil, onSwipeRight: (() -> Void)? = nil) {
             self.onSingleTap = onSingleTap
             self.onScaleChange = onScaleChange
             self.onSwipeDown = onSwipeDown
+            self.onSwipeLeft = onSwipeLeft
+            self.onSwipeRight = onSwipeRight
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
@@ -165,8 +177,20 @@ private struct ZoomableScrollView: UIViewRepresentable {
             }
         }
 
-        @objc func handleSingleTap() {
-            DispatchQueue.main.async { self.onSingleTap() }
+        @objc func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let scrollView = scrollView else {
+                DispatchQueue.main.async { self.onSingleTap() }
+                return
+            }
+            let x = recognizer.location(in: scrollView).x
+            let w = scrollView.bounds.width
+            if x < w * 0.33 && onSwipeRight != nil {
+                DispatchQueue.main.async { self.onSwipeRight?() }
+            } else if x > w * 0.67 && onSwipeLeft != nil {
+                DispatchQueue.main.async { self.onSwipeLeft?() }
+            } else {
+                DispatchQueue.main.async { self.onSingleTap() }
+            }
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -174,24 +198,25 @@ private struct ZoomableScrollView: UIViewRepresentable {
             guard recognizer.state == .ended else { return }
             let translation = recognizer.translation(in: scrollView)
             let velocity = recognizer.velocity(in: scrollView)
-            if translation.y > 60 && velocity.y > 80 && abs(translation.y) > abs(translation.x) {
+            if abs(translation.x) > abs(translation.y) * 1.5 && (abs(translation.x) > 50 || abs(velocity.x) > 300) {
+                if translation.x < 0 {
+                    DispatchQueue.main.async { self.onSwipeLeft?() }
+                } else {
+                    DispatchQueue.main.async { self.onSwipeRight?() }
+                }
+            } else if translation.y > 60 && velocity.y > 80 && abs(translation.y) > abs(translation.x) {
                 DispatchQueue.main.async { self.onSwipeDown?() }
             }
         }
     }
 }
 
-/// UIScrollView, не перехватывающий горизонтальные свайпы при zoom == 1 (чтобы TabView мог листать страницы).
 private class ZoomScrollView: UIScrollView {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === panGestureRecognizer,
-              let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+        guard gestureRecognizer === panGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
-        if zoomScale > 1.0 { return true }
-        let t = pan.translation(in: self)
-        if t == .zero { return false }
-        return abs(t.y) > abs(t.x)
+        return true
     }
 }
 
@@ -376,7 +401,13 @@ struct FullScreenPhotoGalleryView: View {
                             currentPageZoomScale = newScale
                         }
                     },
-                    onSwipeDown: onDismiss
+                    onSwipeDown: onDismiss,
+                    onSwipeLeft: {
+                        withAnimation { currentIndex = min(urls.count - 1, currentIndex + 1) }
+                    },
+                    onSwipeRight: {
+                        withAnimation { currentIndex = max(0, currentIndex - 1) }
+                    }
                 )
                 .tag(index)
             }
@@ -396,16 +427,10 @@ struct FullScreenPhotoGalleryView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .onTapGesture(perform: onDismiss)
             } else {
-                // Структура вью не меняется при zoom — включаем/выключаем жест через .including,
-                // иначе SwiftUI пересоздаёт TabView и AsyncImage перезагружается.
                 pagingTabView
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 0).onChanged { _ in },
-                        including: .none
-                    )
-                .onChange(of: currentIndex) { _, _ in
-                    currentPageZoomScale = 1
-                }
+                    .onChange(of: currentIndex) { _, _ in
+                        currentPageZoomScale = 1
+                    }
 
                 if overlayVisible {
                     VStack(spacing: 0) {
@@ -516,40 +541,6 @@ struct FullScreenPhotoGalleryView: View {
                     .zIndex(2)
                 }
 
-                // Стрелки влево/вправо — почти прозрачные, перелистывание
-                if urls.count > 1 {
-                    HStack {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                currentIndex = max(0, currentIndex - 1)
-                            }
-                        } label: {
-                            Color.clear
-                                .frame(width: 56, height: 120)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(currentIndex <= 0)
-                        .padding(.leading, 4)
-
-                        Spacer(minLength: 0)
-
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                currentIndex = min(urls.count - 1, currentIndex + 1)
-                            }
-                        } label: {
-                            Color.clear
-                                .frame(width: 56, height: 120)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(currentIndex >= urls.count - 1)
-                        .padding(.trailing, 4)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 120)
-                }
             }
         }
         .onAppear {
@@ -819,7 +810,7 @@ struct FullScreenPhotoGalleryView: View {
             .font(.title2)
             .frame(width: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 8)
+            .padding(.leading, 20)
 
             Group {
                 if postCommentsContext != nil || photoCommentsContext != nil || onTapComments != nil {
@@ -859,7 +850,7 @@ struct FullScreenPhotoGalleryView: View {
             .disabled(repostInProgress || repostObject == nil)
             .frame(width: 44)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.trailing, 8)
+            .padding(.trailing, 20)
         }
         .padding(.vertical, 16)
         .padding(.bottom, 24)

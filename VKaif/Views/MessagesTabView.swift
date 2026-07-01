@@ -60,6 +60,7 @@ struct MessagesTabView: View {
                     Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
                         .foregroundColor(.white)
                 }
+                .tint(.white)
             }
         }
         .onAppear { loadConversations() }

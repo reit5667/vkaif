@@ -13,8 +13,8 @@ struct DrawerMenuView: View {
             appNameLabel
             profileBlock
             Divider()
-                .overlay(Color.white.opacity(0.15))
-                .padding(.bottom, 4)
+                .overlay(Color.white.opacity(0.1))
+                .padding(.leading, 16)
             menuItems
             Spacer()
         }
@@ -24,16 +24,21 @@ struct DrawerMenuView: View {
     }
 
     private var appNameLabel: some View {
-        HStack(spacing: 0) {
-            Text("VK")
-                .font(.system(size: 20, weight: .bold))
-            Text("айф")
-                .font(.system(size: 20, weight: .regular))
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text("VK")
+                    .font(.system(size: 20, weight: .bold))
+                Text("айф")
+                    .font(.system(size: 20, weight: .regular))
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+                .overlay(Color.white.opacity(0.1))
+                .padding(.leading, 16)
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 16)
-        .padding(.top, 56)
-        .padding(.bottom, 10)
     }
 
     private var profileBlock: some View {
@@ -46,7 +51,7 @@ struct DrawerMenuView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 0)
+        .padding(.top, 14)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())

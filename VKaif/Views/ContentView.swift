@@ -358,6 +358,7 @@ struct ContentView: View {
             .frame(width: 36, height: 36)
         }
         .buttonStyle(.plain)
+        .tint(.white)
     }
 
     // MARK: - Лента постов (LazyVStack)

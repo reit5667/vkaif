@@ -5,6 +5,10 @@
 *.xcuserstate
 **/xcuserdata/
 
+# Брендинг / иконки (не в репо)
+vkaif-en.png
+vkaif-ru.png
+
 # Контекст проекта / планирование (только код в git)
 PRD-CleanFeedVK-2026-04-04.md
 PROJECT_STATUS.md
