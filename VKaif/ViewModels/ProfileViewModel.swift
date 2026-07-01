@@ -18,6 +18,8 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var userLoadState: ProfileLoadState = .idle
     /// Главное фото профиля из photos.get(album_id=-6) — полный размер; без него показываем fallback из users.get.
     @Published private(set) var profileMainPhoto: VKPhoto?
+    /// Последние фото пользователя для полосы в шапке профиля (album_id=-7, count=5).
+    @Published private(set) var profilePhotos: [VKPhoto] = []
 
     // MARK: - Вкладки (отдельные вызовы, не одним await)
 
@@ -56,6 +58,7 @@ final class ProfileViewModel: ObservableObject {
             let ownerIdForAlbums = user?.id ?? userId
             if let oid = user?.id ?? userId {
                 Task { await loadProfileMainPhoto(ownerId: oid) }
+                Task { await loadProfilePhotos(ownerId: oid) }
                 Task { await loadWall(ownerId: oid, forceRefresh: false) }
             }
             Task { await loadFriends(forceRefresh: false) }
@@ -69,11 +72,13 @@ final class ProfileViewModel: ObservableObject {
         guard authService.accessToken != nil else { return }
         hasStartedInitialLoad = true
         profileMainPhoto = nil
+        profilePhotos = []
         Task {
             await loadUserOnce(ids: userId.map { [String(describing: $0)] }, forceRefresh: true)
             let ownerIdForAlbums = user?.id ?? userId
             if let oid = user?.id ?? userId {
                 Task { await loadProfileMainPhoto(ownerId: oid) }
+                Task { await loadProfilePhotos(ownerId: oid) }
                 Task { await loadWall(ownerId: oid, forceRefresh: true) }
             }
             Task { await loadFriends(forceRefresh: true) }
@@ -110,6 +115,17 @@ final class ProfileViewModel: ObservableObject {
             await MainActor.run { profileMainPhoto = photo }
         } catch {
             await MainActor.run { profileMainPhoto = nil }
+        }
+    }
+
+    /// Последние фото пользователя (photos.get, album_id=-7) — для горизонтальной полосы в шапке.
+    private func loadProfilePhotos(ownerId: Int) async {
+        guard let token = authService.accessToken else { return }
+        do {
+            let response = try await vkApi.getPhotos(token: token, ownerId: ownerId, albumId: -7, count: 5, offset: 0, rev: 1)
+            await MainActor.run { profilePhotos = response.items }
+        } catch {
+            await MainActor.run { profilePhotos = [] }
         }
     }
 

@@ -3,39 +3,25 @@ import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
-/// Экран профиля: свой или друга. Composition: Header (users.get) + вкладки загружаются асинхронно и независимо через ProfileViewModel.
-/// viewModel: если передан (таб «Профиль» в ContentView) — один экземпляр на всё приложение; иначе создаётся свой (профиль друга).
 struct ProfileView: View {
 
     @ObservedObject var authService: AuthService
     @ObservedObject var viewModel: ProfileViewModel
     private var userId: Int? { viewModel.userId }
+    private var isOwnProfile: Bool { userId == nil }
 
-    @State private var selectedTab: ProfileTab = .wall
     @State private var isAvatarFullScreenPresented = false
+    @State private var isAvatarActionSheetPresented = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var avatarUploadInProgress = false
     @State private var avatarUploadMessage: String? = nil
     @State private var avatarUploadSuccess = false
 
+    @State private var showFriends = false
+    @State private var showPhotos = false
+    @State private var showGroups = false
+
     private let vkApi = VKApiService()
-
-    init(authService: AuthService, viewModel: ProfileViewModel) {
-        self.authService = authService
-        self.viewModel = viewModel
-    }
-
-    private enum ProfileTab: String, CaseIterable {
-        case wall = "Стена"
-        case photo = "Фото"
-        case friends = "Друзья"
-        case groups = "Группы"
-    }
-
-    /// Группы — только у текущего пользователя; у друга вкладку не показываем.
-    private var availableTabs: [ProfileTab] {
-        userId == nil ? ProfileTab.allCases : [.wall, .photo, .friends]
-    }
 
     var body: some View {
         Group {
@@ -76,130 +62,435 @@ struct ProfileView: View {
         .onAppear { viewModel.loadProfileIfNeeded() }
     }
 
-    /// Header + Picker сверху; контент вкладки (List) — отдельно с .frame(maxHeight: .infinity).
-    /// Для вкладки «Стена» — header и посты в одном ScrollView.
-    private func profileContent(user: VKUserDetail) -> some View {
-        let header = VStack(spacing: 24) {
-            avatarSection(user: user)
-            nameSection(user: user)
-                .padding(.top, 4)
-            if let status = user.status, !status.isEmpty {
-                statusSection(status: status)
-            }
-            Picker("", selection: $selectedTab) {
-                ForEach(availableTabs, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        .padding(.horizontal)
+    // MARK: - Основной контент
 
-        /// Стена, Группы, Друзья — один ScrollView (header + контент скроллятся вместе). Фото — отдельная вкладка с альбомами.
-        return Group {
-            if selectedTab == .wall || selectedTab == .groups || selectedTab == .friends {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        header
-                        tabContent(user: user)
-                            .id(tabContentId)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding()
-                }
-            } else {
-                VStack(spacing: 20) {
-                    header
-                    tabContent(user: user)
-                        .id(tabContentId)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .padding()
+    private func profileContent(user: VKUserDetail) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                profileHeader(user: user)
+                wallSection(user: user)
             }
-        }
-        .onChange(of: selectedTab) { _, newTab in
-            loadTabIfNeeded(tab: newTab, user: user)
         }
         .fullScreenCover(isPresented: $isAvatarFullScreenPresented) {
             profileMainPhotoGalleryView(user: user)
         }
-        .onAppear {
-            if !availableTabs.contains(selectedTab) {
-                selectedTab = availableTabs.first ?? .wall
+        .navigationDestination(isPresented: $showFriends) {
+            friendsScreen(user: user)
+        }
+        .navigationDestination(isPresented: $showPhotos) {
+            photosScreen(user: user)
+        }
+        .navigationDestination(isPresented: $showGroups) {
+            groupsScreen(user: user)
+        }
+    }
+
+    // MARK: - Шапка профиля
+
+    private func profileHeader(user: VKUserDetail) -> some View {
+        VStack(spacing: 0) {
+            avatarSection(user: user)
+
+            VStack(alignment: .leading, spacing: 6) {
+                nameRow(user: user)
+                onlineStatusRow(user: user)
+                if let status = user.status, !status.isEmpty {
+                    Text(status)
+                        .font(.system(size: 14))
+                        .foregroundStyle(VKTheme.Colors.textSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            actionButtonsRow(user: user)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
+            statsBlock(user: user)
+                .padding(.top, 16)
+
+            if !viewModel.profilePhotos.isEmpty {
+                photoStrip(photos: viewModel.profilePhotos)
+                    .padding(.top, 2)
+            }
+
+            wallTabLabel
+                .padding(.top, 8)
+        }
+        .background(Color.white)
+    }
+
+    // MARK: - Аватар
+
+    private func avatarSection(user: VKUserDetail) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    Group {
+                        if let urlString = mainPhotoURL(user: user), let url = URL(string: urlString) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                case .failure:
+                                    Image(systemName: "person.crop.square.fill")
+                                        .resizable().scaledToFit()
+                                        .foregroundStyle(.secondary)
+                                        .padding(54)
+                                        .background(Color(.systemGray5))
+                                case .empty:
+                                    Color(.systemGray5).overlay(ProgressView())
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
+                        } else {
+                            Image(systemName: "person.crop.square.fill")
+                                .resizable().scaledToFit()
+                                .foregroundStyle(.secondary)
+                                .padding(54)
+                                .background(Color(.systemGray5))
+                        }
+                    }
+                    .clipped()
+                }
+                .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare))
+            .onTapGesture {
+                if isOwnProfile {
+                    isAvatarActionSheetPresented = true
+                } else {
+                    isAvatarFullScreenPresented = true
+                }
+            }
+            .confirmationDialog("Фото профиля", isPresented: $isAvatarActionSheetPresented, titleVisibility: .visible) {
+                Button("Открыть фото") { isAvatarFullScreenPresented = true }
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images, photoLibrary: .shared()) {
+                    Text(avatarUploadInProgress ? "Загрузка…" : "Изменить аватарку")
+                }
+                .disabled(avatarUploadInProgress)
+                Button("Отмена", role: .cancel) { }
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                guard let item = newItem else { return }
+                Task { await uploadProfilePhoto(from: item) }
+            }
+
+            if avatarUploadInProgress {
+                ProgressView()
+                    .tint(.white)
+                    .padding(6)
+                    .background(Color.black.opacity(0.45))
+                    .clipShape(Circle())
+                    .offset(x: 4, y: 4)
             }
         }
     }
 
-    /// Идентификатор контента вкладки: при изменении данных SwiftUI пересоздаёт view.
-    private var tabContentId: String {
-        "albums-\(viewModel.albums.count)-friends-\(viewModel.friends.count)-groups-\(viewModel.groups.count)"
+    // MARK: - Имя + галочка + стрелка
+
+    private func nameRow(user: VKUserDetail) -> some View {
+        HStack(spacing: 6) {
+            Text(user.displayName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(VKTheme.Colors.textPrimary)
+            if user.verified == 1 {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(VKTheme.Colors.primary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(VKTheme.Colors.textSecondary)
+        }
     }
+
+    // MARK: - Онлайн-статус
 
     @ViewBuilder
-    private func tabContent(user: VKUserDetail) -> some View {
-        switch selectedTab {
-        case .wall:
-            ProfileWallTabView(
-                posts: viewModel.wallPosts,
-                profiles: viewModel.wallProfiles,
-                groups: viewModel.wallGroups,
-                loadState: viewModel.wallLoadState,
-                user: user,
-                authService: authService,
-                isOwnProfile: userId == nil,
-                onDeletePost: { viewModel.removeWallPost($0) },
-                onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) },
-                embeddedInScroll: true
-            )
-        case .photo:
-            ProfilePhotoTabView(
-                albums: viewModel.albums,
-                loadState: viewModel.albumsLoadState,
-                authService: authService,
-                ownerId: user.id,
-                isOwnProfile: userId == nil,
-                onRefresh: { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: true) }
-            )
-        case .friends:
-            ProfileFriendsTabView(
-                friends: viewModel.friends,
-                loadState: viewModel.friendsLoadState,
-                authService: authService,
-                onRefresh: { await viewModel.loadFriends(forceRefresh: true) },
-                embeddedInScroll: true
-            )
-        case .groups:
-            ProfileGroupsTabView(
-                groups: viewModel.groups,
-                loadState: viewModel.groupsLoadState,
-                authService: authService,
-                onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
-                onLeaveSuccess: { Task { await viewModel.loadGroups(forceRefresh: true) } },
-                embeddedInScroll: true
-            )
+    private func onlineStatusRow(user: VKUserDetail) -> some View {
+        if user.isOnline {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(VKTheme.Colors.online)
+                    .frame(width: 7, height: 7)
+                Text("В сети")
+                    .font(.system(size: 13))
+                    .foregroundStyle(VKTheme.Colors.online)
+            }
+        } else if let lastSeen = user.lastSeen, let time = lastSeen.time {
+            let date = Date(timeIntervalSince1970: TimeInterval(time))
+            let prefix = user.isFemale ? "Была в сети" : "Был в сети"
+            Text("\(prefix) \(formattedLastSeen(date))")
+                .font(.system(size: 13))
+                .foregroundStyle(VKTheme.Colors.textSecondary)
         }
     }
 
-    /// Подгрузить данные вкладки при переключении (второй шанс, если при первой загрузке не обновилось).
-    private func loadTabIfNeeded(tab: ProfileTab, user: VKUserDetail) {
-        switch tab {
-        case .wall:
-            Task { await viewModel.loadWall(ownerId: user.id, forceRefresh: false) }
-        case .photo:
-            Task { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: false) }
-        case .friends:
-            Task { await viewModel.loadFriends(forceRefresh: false) }
-        case .groups:
-            Task { await viewModel.loadGroups(forceRefresh: false) }
+    private func formattedLastSeen(_ date: Date) -> String {
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "ru_RU")
+        if cal.isDateInToday(date) {
+            fmt.dateFormat = "HH:mm"
+            return "сегодня в \(fmt.string(from: date))"
+        } else if cal.isDateInYesterday(date) {
+            fmt.dateFormat = "HH:mm"
+            return "вчера в \(fmt.string(from: date))"
+        } else {
+            fmt.dateFormat = "d MMM"
+            return fmt.string(from: date)
         }
     }
 
-    /// URL главного фото: из альбома «Фото профиля» (photos.get -6) в полном размере; иначе fallback из users.get.
+    // MARK: - Кнопки действий
+
+    @ViewBuilder
+    private func actionButtonsRow(user: VKUserDetail) -> some View {
+        VStack(spacing: 6) {
+            if isOwnProfile {
+                Button { } label: {
+                    Text("Редактировать")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(VKTheme.Colors.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: VKTheme.Radius.button)
+                                .stroke(VKTheme.Colors.separator, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 8) {
+                    Button { } label: {
+                        Text("Добавить в друзья")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(VKTheme.Colors.primary)
+                            .cornerRadius(VKTheme.Radius.button)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { } label: {
+                        Text("Сообщение")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(VKTheme.Colors.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: VKTheme.Radius.button)
+                                    .stroke(VKTheme.Colors.separator, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let msg = avatarUploadMessage {
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(avatarUploadSuccess ? .green : .red)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    // MARK: - Блок статистики
+
+    private func statsBlock(user: VKUserDetail) -> some View {
+        let items: [(Int?, String, (() -> Void)?)] = [
+            (user.counters?.friends,                       "друзья",      { showFriends = true }),
+            (user.followersCount ?? user.counters?.followers, "подписчики", nil),
+            (user.counters?.photos,                        "фото",        { showPhotos = true }),
+            (user.counters?.videos,                        "видео",       nil),
+            (user.counters?.audios,                        "аудио",       nil),
+            (user.counters?.groups,                        "группы",      { showGroups = true })
+        ]
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                statCell(items[0])
+                statSeparator
+                statCell(items[1])
+                statSeparator
+                statCell(items[2])
+            }
+            Rectangle()
+                .fill(VKTheme.Colors.separator)
+                .frame(height: 1)
+                .padding(.horizontal, 12)
+            HStack(spacing: 0) {
+                statCell(items[3])
+                statSeparator
+                statCell(items[4])
+                statSeparator
+                statCell(items[5])
+            }
+        }
+        .background(Color.white)
+        .frame(maxWidth: .infinity)
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(VKTheme.Colors.separator, lineWidth: 1)
+        )
+    }
+
+    private var statSeparator: some View {
+        Rectangle()
+            .fill(VKTheme.Colors.separator)
+            .frame(width: 1)
+            .padding(.vertical, 8)
+    }
+
+    private func statCell(_ item: (Int?, String, (() -> Void)?)) -> some View {
+        Button {
+            item.2?()
+        } label: {
+            VStack(spacing: 3) {
+                Text(item.0.map { formatStatCount($0) } ?? "—")
+                    .font(VKTheme.TextStyle.statNumber)
+                    .foregroundStyle(item.2 != nil ? VKTheme.Colors.primary : VKTheme.Colors.textPrimary)
+                Text(item.1)
+                    .font(VKTheme.TextStyle.statLabel)
+                    .foregroundStyle(VKTheme.Colors.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(item.2 == nil)
+    }
+
+    private func formatStatCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    // MARK: - Полоса фото
+
+    private func photoStrip(photos: [VKPhoto]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(photos, id: \.id) { photo in
+                    Group {
+                        if let s = photo.displayURL, let url = URL(string: s) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let img): img.resizable().scaledToFill()
+                                default: Color(.systemGray5)
+                                }
+                            }
+                        } else {
+                            Color(.systemGray5)
+                        }
+                    }
+                    .frame(width: 80, height: 80)
+                    .clipped()
+                }
+            }
+        }
+        .frame(height: 80)
+    }
+
+    // MARK: - Таб "ВСЕ ЗАПИСИ" (одиночный, без переключения)
+
+    private var wallTabLabel: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    Text("ВСЕ ЗАПИСИ")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(VKTheme.Colors.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    Rectangle()
+                        .fill(VKTheme.Colors.primary)
+                        .frame(height: 2)
+                }
+                Spacer(minLength: 0)
+            }
+            Divider()
+        }
+        .background(Color.white)
+    }
+
+    // MARK: - Стена
+
+    private func wallSection(user: VKUserDetail) -> some View {
+        ProfileWallTabView(
+            posts: viewModel.wallPosts,
+            profiles: viewModel.wallProfiles,
+            groups: viewModel.wallGroups,
+            loadState: viewModel.wallLoadState,
+            user: user,
+            authService: authService,
+            isOwnProfile: isOwnProfile,
+            onDeletePost: { viewModel.removeWallPost($0) },
+            onRefresh: { await viewModel.loadWall(ownerId: user.id, forceRefresh: true) },
+            embeddedInScroll: true
+        )
+    }
+
+    // MARK: - Экраны навигации из статблока
+
+    private func friendsScreen(user: VKUserDetail) -> some View {
+        ProfileFriendsTabView(
+            friends: viewModel.friends,
+            loadState: viewModel.friendsLoadState,
+            authService: authService,
+            onRefresh: { await viewModel.loadFriends(forceRefresh: true) },
+            embeddedInScroll: false
+        )
+        .navigationTitle("Друзья")
+        .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
+    }
+
+    private func photosScreen(user: VKUserDetail) -> some View {
+        ProfilePhotoTabView(
+            albums: viewModel.albums,
+            loadState: viewModel.albumsLoadState,
+            authService: authService,
+            ownerId: user.id,
+            isOwnProfile: isOwnProfile,
+            onRefresh: { await viewModel.loadAlbums(ownerId: user.id, forceRefresh: true) }
+        )
+        .navigationTitle("Фотографии")
+        .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
+    }
+
+    private func groupsScreen(user: VKUserDetail) -> some View {
+        ProfileGroupsTabView(
+            groups: viewModel.groups,
+            loadState: viewModel.groupsLoadState,
+            authService: authService,
+            onRefresh: { await viewModel.loadGroups(forceRefresh: true) },
+            onLeaveSuccess: { Task { await viewModel.loadGroups(forceRefresh: true) } },
+            embeddedInScroll: false
+        )
+        .navigationTitle("Сообщества")
+        .navigationBarTitleDisplayMode(.inline)
+        .vkBlueNavBar()
+        .onAppear { Task { await viewModel.loadGroups(forceRefresh: false) } }
+    }
+
+    // MARK: - Fullscreen фото профиля
+
     private func mainPhotoURL(user: VKUserDetail) -> String? {
         viewModel.profileMainPhoto?.displayURL ?? user.fullScreenAvatarURL
     }
 
-    /// Fullscreen-галерея главного фото профиля: тот же экран, что у фото из ленты/альбома (лайки, комментарии, меню).
     @ViewBuilder
     private func profileMainPhotoGalleryView(user: VKUserDetail) -> some View {
         if let urlString = mainPhotoURL(user: user), let url = URL(string: urlString) {
@@ -221,82 +512,9 @@ struct ProfileView: View {
                 },
                 vkApi: vkApi,
                 getAccessToken: { authService.accessToken ?? "" },
-                isOwnPhotos: userId == nil,
-                isProfileAlbum: (userId == nil)
+                isOwnPhotos: isOwnProfile,
+                isProfileAlbum: isOwnProfile
             )
-        }
-    }
-
-    /// Шапка профиля: главное фото (полноразмерное из альбома -6, обрезка под прямоугольник с закруглёнными нижними углами), ниже — «Изменить фото» и имя.
-    private func avatarSection(user: VKUserDetail) -> some View {
-        VStack(spacing: 16) {
-            Group {
-                if let urlString = mainPhotoURL(user: user), let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure:
-                            Image(systemName: "person.crop.rectangle.fill")
-                                .resizable()
-                                .scaledToFill()
-                                .foregroundStyle(.secondary)
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 240)
-                    .clipped()
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: 16, bottomTrailing: 16, topTrailing: 0)
-                        )
-                    )
-                } else {
-                    Rectangle()
-                        .fill(Color(.systemGray5))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 240)
-                        .overlay(
-                            Image(systemName: "person.crop.rectangle.fill")
-                                .font(.system(size: 48))
-                                .foregroundStyle(.secondary)
-                        )
-                        .clipShape(
-                            UnevenRoundedRectangle(
-                                cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: 16, bottomTrailing: 16, topTrailing: 0)
-                            )
-                        )
-                }
-            }
-            .onTapGesture { isAvatarFullScreenPresented = true }
-
-            if userId == nil {
-                PhotosPicker(
-                    selection: $selectedPhotoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label(avatarUploadInProgress ? "Загрузка…" : "Изменить фото профиля", systemImage: "camera.fill")
-                        .font(.subheadline)
-                }
-                .disabled(avatarUploadInProgress)
-                .onChange(of: selectedPhotoItem) { _, newItem in
-                    guard let item = newItem else { return }
-                    Task { await uploadProfilePhoto(from: item) }
-                }
-                if let msg = avatarUploadMessage {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(avatarUploadSuccess ? .green : .red)
-                        .multilineTextAlignment(.center)
-                }
-            }
         }
     }
 
@@ -329,29 +547,9 @@ struct ProfileView: View {
             }
         }
     }
-
-    private func nameSection(user: VKUserDetail) -> some View {
-        Text(user.displayName)
-            .font(.title2)
-            .fontWeight(.semibold)
-    }
-
-    private func statusSection(status: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Статус")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(status)
-                .font(.body)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
-    }
 }
 
-// MARK: - Состояние загрузки профиля
+// MARK: - ProfileLoadState
 
 enum ProfileLoadState {
     case idle
@@ -361,7 +559,8 @@ enum ProfileLoadState {
     case notAuthenticated
 }
 
-/// Обёртка для профиля друга: создаёт и держит ViewModel (userId != nil). Для «свой профиль» в табе ViewModel передаётся из ContentView.
+// MARK: - Обёртка для профиля друга
+
 struct ProfileViewWrapper: View {
     @ObservedObject var authService: AuthService
     let userId: Int?
@@ -379,7 +578,8 @@ struct ProfileViewWrapper: View {
     }
 }
 
-// MARK: - Transferable для загрузки фото из галереи (PhotosPicker)
+// MARK: - Transferable для загрузки фото из галереи
+
 private struct ImageDataTransfer: Transferable {
     let data: Data
     var dataAsJpeg: Data {

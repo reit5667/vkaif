@@ -716,7 +716,7 @@ struct UsersGetResponse: Decodable {
     let response: [VKUserDetail]
 }
 
-/// Профиль пользователя из users.get (аватар, имя, статус).
+/// Профиль пользователя из users.get (аватар, имя, статус, счётчики).
 struct VKUserDetail: Decodable {
     let id: Int
     let firstName: String?
@@ -727,6 +727,12 @@ struct VKUserDetail: Decodable {
     let photoMax: String?
     let photoMaxOrig: String?
     let status: String?
+    let online: Int?
+    let lastSeen: VKLastSeen?
+    let verified: Int?
+    let sex: Int?
+    let counters: VKUserCounters?
+    let followersCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -738,6 +744,12 @@ struct VKUserDetail: Decodable {
         case photoMax = "photo_max"
         case photoMaxOrig = "photo_max_orig"
         case status
+        case online
+        case lastSeen = "last_seen"
+        case verified
+        case sex
+        case counters
+        case followersCount = "followers_count"
     }
 
     var displayName: String {
@@ -745,6 +757,9 @@ struct VKUserDetail: Decodable {
             .trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? "ID\(id)" : name
     }
+
+    var isOnline: Bool { online == 1 }
+    var isFemale: Bool { sex == 1 }
 
     /// URL аватара для экрана профиля: photo_200 или photo_50 (для списков и мелких мест).
     var avatarURL: String? { photo200 ?? photo50 }
@@ -754,6 +769,21 @@ struct VKUserDetail: Decodable {
 
     /// URL для полноэкранного просмотра: photo_max_orig → photo_max → photo_400 → photo_200. Качество зависит от того, что вернул VK.
     var fullScreenAvatarURL: String? { photoMaxOrig ?? photoMax ?? photo400 ?? photo200 ?? photo50 }
+}
+
+struct VKLastSeen: Decodable {
+    let time: Int?
+    let platform: Int?
+}
+
+struct VKUserCounters: Decodable {
+    let friends: Int?
+    let followers: Int?
+    let photos: Int?
+    let videos: Int?
+    let audios: Int?
+    let groups: Int?
+    let albums: Int?
 }
 
 // MARK: - photos.getAlbums
