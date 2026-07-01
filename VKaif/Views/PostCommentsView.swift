@@ -154,27 +154,27 @@ struct PostCommentsView: View {
                     }
                 } label: {
                     Text(commentAuthorName(comment))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(VKTheme.TextStyle.postAuthorName)
                         .foregroundColor(VKTheme.Colors.primary)
                 }
                 .buttonStyle(.plain)
 
                 if !comment.text.isEmpty {
                     Text(comment.text)
-                        .font(.system(size: 14))
+                        .font(VKTheme.TextStyle.commentBody)
                         .foregroundColor(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 12) {
                     Text(commentTimeString(from: comment.date))
-                        .font(.system(size: 12))
+                        .font(VKTheme.TextStyle.commentTimestamp)
                         .foregroundStyle(VKTheme.Colors.textSecondary)
                     Button("Ответить") {
                         replyTarget = comment
                         inputFocused = true
                     }
-                    .font(.system(size: 12))
+                    .font(VKTheme.TextStyle.commentTimestamp)
                     .foregroundStyle(VKTheme.Colors.textSecondary)
                     Spacer()
                     likeButton(comment)

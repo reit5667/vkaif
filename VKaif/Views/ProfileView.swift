@@ -20,6 +20,7 @@ struct ProfileView: View {
     @State private var showFriends = false
     @State private var showPhotos = false
     @State private var showGroups = false
+    @State private var showInfo = false
 
     private let vkApi = VKApiService()
 
@@ -55,7 +56,9 @@ struct ProfileView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if case .loaded = viewModel.userLoadState {
-                    Button("Обновить") { viewModel.refreshAll() }
+                    Button { viewModel.refreshAll() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
                 }
             }
         }
@@ -96,13 +99,22 @@ struct ProfileView: View {
                 onlineStatusRow(user: user)
                 if let status = user.status, !status.isEmpty {
                     Text(status)
-                        .font(.system(size: 14))
+                        .font(VKTheme.TextStyle.commentBody)
                         .foregroundStyle(VKTheme.Colors.textSecondary)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if showInfo {
+                inlineInfoBlock(user: user)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(VKTheme.Colors.secondaryBackground)
+                    .transition(.opacity)
+            }
 
             actionButtonsRow(user: user)
                 .padding(.horizontal, 16)
@@ -193,20 +205,78 @@ struct ProfileView: View {
     // MARK: - Имя + галочка + стрелка
 
     private func nameRow(user: VKUserDetail) -> some View {
-        HStack(spacing: 6) {
-            Text(user.displayName)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(VKTheme.Colors.textPrimary)
-            if user.verified == 1 {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(VKTheme.Colors.primary)
+        Button { withAnimation(.easeInOut(duration: 0.2)) { showInfo.toggle() } } label: {
+            HStack(spacing: 6) {
+                Text(user.displayName)
+                    .font(VKTheme.TextStyle.profileName)
+                    .foregroundStyle(VKTheme.Colors.textPrimary)
+                if user.verified == 1 {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(VKTheme.Colors.primary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(VKTheme.Colors.textSecondary)
+                    .rotationEffect(.degrees(showInfo ? 180 : 0))
             }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(VKTheme.Colors.textSecondary)
         }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Инлайн блок подробной информации
+
+    private func inlineInfoBlock(user: VKUserDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let bdate = formattedBdate(user.bdate) {
+                infoRow(label: "День рождения", value: bdate)
+            }
+            if let hometown = user.homeTown, !hometown.isEmpty {
+                infoRow(label: "Родной город", value: hometown)
+            } else if let city = user.city?.title {
+                infoRow(label: "Город", value: city)
+            }
+            if let country = user.country?.title {
+                infoRow(label: "Страна", value: country)
+            }
+            if let rel = user.relationText {
+                infoRow(label: "Семейное положение", value: rel)
+            }
+            if let site = user.site, !site.isEmpty {
+                infoRow(label: "Сайт", value: site)
+            }
+            if let about = user.about, !about.isEmpty {
+                infoRow(label: "О себе", value: about)
+            }
+            if let relatives = user.relatives, !relatives.isEmpty {
+                infoRow(label: "Родственники", value: relatives.compactMap { $0.name }.joined(separator: ", "))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(VKTheme.TextStyle.commentTimestamp)
+                .foregroundStyle(VKTheme.Colors.textSecondary)
+            Text(value)
+                .font(VKTheme.TextStyle.commentBody)
+                .foregroundStyle(VKTheme.Colors.textPrimary)
+        }
+    }
+
+    private func formattedBdate(_ bdate: String?) -> String? {
+        guard let bdate, !bdate.isEmpty else { return nil }
+        let parts = bdate.split(separator: ".").compactMap { Int($0) }
+        guard parts.count >= 2 else { return bdate }
+        let months = ["января","февраля","марта","апреля","мая","июня",
+                      "июля","августа","сентября","октября","ноября","декабря"]
+        let day = parts[0]
+        let monthName = parts[1] >= 1 && parts[1] <= 12 ? months[parts[1] - 1] : "\(parts[1])"
+        return parts.count >= 3 ? "\(day) \(monthName) \(parts[2])" : "\(day) \(monthName)"
     }
 
     // MARK: - Онлайн-статус
@@ -219,14 +289,14 @@ struct ProfileView: View {
                     .fill(VKTheme.Colors.online)
                     .frame(width: 7, height: 7)
                 Text("В сети")
-                    .font(.system(size: 13))
+                    .font(VKTheme.TextStyle.timestamp)
                     .foregroundStyle(VKTheme.Colors.online)
             }
         } else if let lastSeen = user.lastSeen, let time = lastSeen.time {
             let date = Date(timeIntervalSince1970: TimeInterval(time))
             let prefix = user.isFemale ? "Была в сети" : "Был в сети"
             Text("\(prefix) \(formattedLastSeen(date))")
-                .font(.system(size: 13))
+                .font(VKTheme.TextStyle.timestamp)
                 .foregroundStyle(VKTheme.Colors.textSecondary)
         }
     }
@@ -255,7 +325,7 @@ struct ProfileView: View {
             if isOwnProfile {
                 Button { } label: {
                     Text("Редактировать")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(VKTheme.TextStyle.profileAction)
                         .foregroundStyle(VKTheme.Colors.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -269,7 +339,7 @@ struct ProfileView: View {
                 HStack(spacing: 8) {
                     Button { } label: {
                         Text("Добавить в друзья")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(VKTheme.TextStyle.profileActionSecondary)
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -280,7 +350,7 @@ struct ProfileView: View {
 
                     Button { } label: {
                         Text("Сообщение")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(VKTheme.TextStyle.profileActionSecondary)
                             .foregroundStyle(VKTheme.Colors.primary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -409,7 +479,7 @@ struct ProfileView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     Text("ВСЕ ЗАПИСИ")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(VKTheme.TextStyle.sectionHeader)
                         .foregroundStyle(VKTheme.Colors.primary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)

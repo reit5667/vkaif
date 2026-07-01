@@ -33,6 +33,8 @@ enum VKTheme {
         static let online = Color(hex: "#4BB34B")
         /// Фон экрана чата (классический VK — голубовато-серый)
         static let chatBackground = Color(hex: "#D5DDE5")
+        /// Фон кнопки-бургера в шапке ленты
+        static let profileHeaderBackground = Color.clear
     }
 
     // MARK: Geometry
@@ -69,15 +71,30 @@ enum VKTheme {
     // MARK: Typography helpers
 
     enum TextStyle {
-        static let postAuthorName  = Font.system(size: 15, weight: .semibold)
-        static let postBody        = Font.system(size: 15, weight: .regular)
-        static let timestamp       = Font.system(size: 13, weight: .regular)
-        static let dialogName      = Font.system(size: 15, weight: .semibold)
-        static let dialogPreview   = Font.system(size: 13, weight: .regular)
-        static let navTitle        = Font.system(size: 17, weight: .semibold)
-        static let statNumber      = Font.system(size: 17, weight: .bold)
-        static let statLabel       = Font.system(size: 12, weight: .regular)
-        static let sectionHeader   = Font.system(size: 13, weight: .semibold)
+        // Feed / posts
+        static let postAuthorName        = Font.system(size: 15, weight: .semibold)
+        static let postBody              = Font.system(size: 15, weight: .regular)
+        static let timestamp             = Font.system(size: 13, weight: .regular)
+        // Messages list
+        static let dialogName            = Font.system(size: 17, weight: .semibold)
+        static let dialogNameUnread      = Font.system(size: 17, weight: .bold)
+        static let dialogPreview         = Font.system(size: 15, weight: .regular)
+        // Comments
+        static let commentBody           = Font.system(size: 14, weight: .regular)
+        static let commentTimestamp      = Font.system(size: 12, weight: .regular)
+        // Profile
+        static let profileName           = Font.system(size: 18, weight: .bold)
+        static let profileCity           = Font.system(size: 13, weight: .medium)
+        static let profileAction         = Font.system(size: 15, weight: .medium)
+        static let profileActionSecondary = Font.system(size: 14, weight: .medium)
+        // Drawer
+        static let drawerItem            = Font.system(size: 17, weight: .regular)
+        // Shared UI
+        static let navTitle              = Font.system(size: 17, weight: .semibold)
+        static let badge                 = Font.system(size: 12, weight: .semibold)
+        static let statNumber            = Font.system(size: 17, weight: .bold)
+        static let statLabel             = Font.system(size: 12, weight: .regular)
+        static let sectionHeader         = Font.system(size: 13, weight: .semibold)
     }
 }
 

@@ -61,6 +61,8 @@ struct ContentView: View {
     @State private var isDrawerOpen = false
     /// Количество непрочитанных сообщений для бейджа в drawer
     @State private var unreadMessagesCount = 0
+    @AppStorage("setting_notifications") private var settingNotifications = true
+    @AppStorage("setting_refresh_on_open") private var settingRefreshOnOpen = true
 
     var body: some View {
         Group {
@@ -221,6 +223,51 @@ struct ContentView: View {
     private var settingsStubView: some View {
         List {
             Section {
+                HStack(spacing: 12) {
+                    settingsAvatarView
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profileViewModel.user?.displayName ?? "—")
+                            .font(VKTheme.TextStyle.dialogName)
+                            .foregroundStyle(VKTheme.Colors.textPrimary)
+                        Text("Настройки профиля — в разработке")
+                            .font(VKTheme.TextStyle.timestamp)
+                            .foregroundStyle(VKTheme.Colors.textSecondary)
+                    }
+                }
+            } header: {
+                Text("Учётная запись")
+            }
+
+            Section {
+                Toggle("Push-уведомления", isOn: $settingNotifications)
+                    .tint(VKTheme.Colors.primary)
+                Toggle("Обновлять при открытии", isOn: $settingRefreshOnOpen)
+                    .tint(VKTheme.Colors.primary)
+            } header: {
+                Text("Основные")
+            }
+
+            Section {
+                HStack {
+                    Text("Версия")
+                    Spacer()
+                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                        .foregroundStyle(VKTheme.Colors.textSecondary)
+                        .font(VKTheme.TextStyle.timestamp)
+                }
+                HStack {
+                    Text("VKaif")
+                    Spacer()
+                    Text("Неофициальный клиент ВКонтакте")
+                        .foregroundStyle(VKTheme.Colors.textSecondary)
+                        .font(VKTheme.TextStyle.commentTimestamp)
+                        .multilineTextAlignment(.trailing)
+                }
+            } header: {
+                Text("О приложении")
+            }
+
+            Section {
                 Button(role: .destructive) {
                     authService.logout()
                     feedPosts = []
@@ -230,11 +277,37 @@ struct ContentView: View {
                     currentUserId = nil
                     activeSection = .feed
                 } label: {
-                    Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label("Выйти из аккаунта", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
         }
         .navigationTitle("Настройки")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private var settingsAvatarView: some View {
+        let size: CGFloat = 44
+        if let urlStr = profileViewModel.user?.avatarURL, let url = URL(string: urlStr) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Color(hex: "#C8C8C8")
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.button))
+        } else {
+            RoundedRectangle(cornerRadius: VKTheme.Radius.button)
+                .fill(Color(hex: "#C8C8C8"))
+                .frame(width: size, height: size)
+                .overlay(
+                    Image(systemName: "person.fill")
+                        .foregroundStyle(.white)
+                )
+        }
     }
 
     private var feedSectionView: some View {
@@ -283,8 +356,6 @@ struct ContentView: View {
                 }
             }
             .frame(width: 36, height: 36)
-            .background(VKTheme.Colors.profileHeaderBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }

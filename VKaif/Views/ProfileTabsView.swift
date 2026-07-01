@@ -43,17 +43,13 @@ struct ProfileWallTabView: View {
                 if posts.isEmpty {
                     ContentUnavailableView("Нет записей", systemImage: "doc.text")
                 } else {
-                    let wallContent = LazyVStack(spacing: 12) {
+                    let wallContent = LazyVStack(spacing: 0) {
                         ForEach(posts, id: \.postId) { post in
-                            VStack(spacing: 0) {
-                                profileWallPostRow(post)
-                                Divider()
-                            }
-                            .padding(.top, 12)
-                            .padding(.bottom, 12)
-                            .frame(maxWidth: .infinity)
-                            .background(Color(.systemBackground))
-                            .clipped()
+                            profileWallPostRow(post)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemBackground))
+                            Divider()
                         }
                     }
                     .padding(.horizontal)

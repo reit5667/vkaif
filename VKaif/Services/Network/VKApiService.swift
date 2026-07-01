@@ -127,7 +127,7 @@ final class VKApiService: Sendable {
     func getUsers(
         token: String,
         userIds: [String]? = nil,
-        fields: String = "photo_200,photo_400,photo_max,photo_max_orig,status,online,last_seen,verified,sex,counters,followers_count"
+        fields: String = "photo_200,photo_400,photo_max,photo_max_orig,status,online,last_seen,verified,sex,counters,followers_count,bdate,city,country,home_town,relation,relation_partner,relatives,site,about"
     ) async throws -> [VKUserDetail] {
         guard !token.isEmpty else {
             logger?.error("VKApi", "getUsers: empty token")

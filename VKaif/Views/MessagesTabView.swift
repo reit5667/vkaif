@@ -133,17 +133,17 @@ struct MessagesTabView: View {
             avatarView(url: avatarURL(for: item))
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayTitle(for: item))
-                    .font(.system(size: 17, weight: isUnread ? .bold : .semibold))
+                    .font(isUnread ? VKTheme.TextStyle.dialogNameUnread : VKTheme.TextStyle.dialogName)
                     .foregroundColor(VKTheme.Colors.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 0) {
                     if isOutgoing {
                         Text("Вы: ")
-                            .font(.system(size: 15))
+                            .font(VKTheme.TextStyle.dialogPreview)
                             .foregroundColor(VKTheme.Colors.textSecondary)
                     }
                     Text(preview)
-                        .font(.system(size: 15))
+                        .font(VKTheme.TextStyle.dialogPreview)
                         .foregroundColor(VKTheme.Colors.textSecondary)
                         .lineLimit(1)
                 }
@@ -151,11 +151,11 @@ struct MessagesTabView: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 4) {
                 Text(shortDate(item.lastMessage.date))
-                    .font(.system(size: 13))
+                    .font(VKTheme.TextStyle.timestamp)
                     .foregroundColor(isUnread ? VKTheme.Colors.badge : VKTheme.Colors.textSecondary)
                 if isUnread {
                     Text(unread > 99 ? "99+" : "\(unread)")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(VKTheme.TextStyle.badge)
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

@@ -26,7 +26,7 @@ struct DrawerMenuView: View {
         HStack(spacing: 12) {
             avatarView
             Text(profileViewModel.user?.displayName ?? "")
-                .font(.system(size: 17, weight: .semibold))
+                .font(VKTheme.TextStyle.navTitle)
                 .foregroundColor(.white)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -123,12 +123,12 @@ private struct DrawerItem: View {
                     .foregroundColor(itemColor)
                     .font(.system(size: 16))
                 Text(title)
-                    .font(.system(size: 17, weight: isActive ? .semibold : .regular))
+                    .font(isActive ? VKTheme.TextStyle.navTitle : VKTheme.TextStyle.drawerItem)
                     .foregroundColor(itemColor)
                 Spacer()
                 if badge > 0 {
                     Text(badge > 99 ? "99+" : "\(badge)")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(VKTheme.TextStyle.badge)
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

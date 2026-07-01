@@ -733,6 +733,15 @@ struct VKUserDetail: Decodable {
     let sex: Int?
     let counters: VKUserCounters?
     let followersCount: Int?
+    let bdate: String?
+    let city: VKCity?
+    let country: VKCountry?
+    let homeTown: String?
+    let relation: Int?
+    let relationPartner: VKRelationPartner?
+    let relatives: [VKRelative]?
+    let site: String?
+    let about: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -750,6 +759,54 @@ struct VKUserDetail: Decodable {
         case sex
         case counters
         case followersCount = "followers_count"
+        case bdate
+        case city
+        case country
+        case homeTown = "home_town"
+        case relation
+        case relationPartner = "relation_partner"
+        case relatives
+        case site
+        case about
+    }
+
+    var relationText: String? {
+        guard let r = relation else { return nil }
+        let isFem = isFemale
+        switch r {
+        case 1: return isFem ? "Не замужем" : "Не женат"
+        case 2:
+            if let p = relationPartner { return "Встречается с \(p.displayName)" }
+            return isFem ? "Встречается" : "Встречается"
+        case 3:
+            if let p = relationPartner { return "Помолвлена с \(p.displayName)" }
+            return isFem ? "Помолвлена" : "Помолвлен"
+        case 4:
+            if let p = relationPartner { return "\(isFem ? "Замужем" : "Женат") за \(p.displayName)" }
+            return isFem ? "Замужем" : "Женат"
+        case 5: return "Всё сложно"
+        case 6: return isFem ? "В активном поиске" : "В активном поиске"
+        case 7:
+            if let p = relationPartner { return "Влюблена в \(p.displayName)" }
+            return isFem ? "Влюблена" : "Влюблён"
+        case 8:
+            if let p = relationPartner { return "В гражданском браке с \(p.displayName)" }
+            return "В гражданском браке"
+        default: return nil
+        }
+    }
+
+    var relativesTypeText: (String) -> String {
+        return { type in
+            switch type {
+            case "parent":   return "Родитель"
+            case "child":    return "Ребёнок"
+            case "sibling":  return "Брат/Сестра"
+            case "grandparent": return "Бабушка/Дедушка"
+            case "grandchild":  return "Внук/Внучка"
+            default:         return type.capitalized
+            }
+        }
     }
 
     var displayName: String {
@@ -774,6 +831,38 @@ struct VKUserDetail: Decodable {
 struct VKLastSeen: Decodable {
     let time: Int?
     let platform: Int?
+}
+
+struct VKCity: Decodable {
+    let id: Int?
+    let title: String?
+}
+
+struct VKCountry: Decodable {
+    let id: Int?
+    let title: String?
+}
+
+struct VKRelative: Decodable {
+    let id: Int?
+    let name: String?
+    let type: String?
+}
+
+struct VKRelationPartner: Decodable {
+    let id: Int?
+    let firstName: String?
+    let lastName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case firstName = "first_name"
+        case lastName = "last_name"
+    }
+
+    var displayName: String {
+        [firstName, lastName].compactMap { $0 }.joined(separator: " ")
+    }
 }
 
 struct VKUserCounters: Decodable {
