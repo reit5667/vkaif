@@ -57,7 +57,7 @@ private struct ZoomableScrollView: UIViewRepresentable {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.backgroundColor = .clear
         scrollView.bouncesZoom = true
-        scrollView.alwaysBounceVertical = false
+        scrollView.alwaysBounceVertical = true
         scrollView.alwaysBounceHorizontal = false
 
         let imageView = UIImageView()
@@ -174,7 +174,7 @@ private struct ZoomableScrollView: UIViewRepresentable {
             guard recognizer.state == .ended else { return }
             let translation = recognizer.translation(in: scrollView)
             let velocity = recognizer.velocity(in: scrollView)
-            if translation.y > 80 && velocity.y > 100 && abs(translation.y) > abs(translation.x) {
+            if translation.y > 60 && velocity.y > 80 && abs(translation.y) > abs(translation.x) {
                 DispatchQueue.main.async { self.onSwipeDown?() }
             }
         }
@@ -261,7 +261,9 @@ struct FullScreenPhotoGalleryView: View {
     var galleryDeleteRequest: GalleryDeleteRequest? = nil
 
     @State private var currentIndex: Int
-    @State private var overlayVisible = false
+    @State private var overlayVisible = true
+    @State private var showActionsSheet = false
+    @State private var showRepostSheet = false
     @State private var addToSavedInProgress = false
     @State private var addToSavedDone = false
     @State private var addToSavedFailed = false
@@ -412,133 +414,6 @@ struct FullScreenPhotoGalleryView: View {
                         bottomBar
                     }
                     .transition(.opacity)
-                    .padding(.bottom, 60)
-                }
-
-                if showActionsOverlay {
-                    Color.black.opacity(0.45)
-                        .ignoresSafeArea()
-                        .onTapGesture { showActionsOverlay = false }
-                    VStack(spacing: 0) {
-                        if isOwnPhotos, isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
-                            Button {
-                                performMakeProfilePhoto(
-                                    makeProfile: makeProfile,
-                                    ids: ids
-                                )
-                            } label: {
-                                Label(makeProfilePhotoInProgress ? "Сохранение…" : "Сделать фото профиля", systemImage: "person.crop.circle")
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .foregroundStyle(.primary)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(makeProfilePhotoInProgress)
-                            Divider()
-                        }
-                        if isOwnPhotos, let deletePhoto = onDeletePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
-                            Button {
-                                performDeleteCurrentPhoto(deletePhoto: deletePhoto, ids: ids)
-                            } label: {
-                                Label(deletePhotoInProgress ? "Удаление…" : "Удалить", systemImage: "trash")
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .foregroundStyle(.red)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(deletePhotoInProgress)
-                            Divider()
-                        }
-                        if !isOwnPhotos && !isSavedAlbum {
-                            Button {
-                                guard let ids = photoIdsForSaving, currentIndex < ids.count, !addToSavedDone, let api = vkApi else {
-                                    showActionsOverlay = false
-                                    return
-                                }
-                                let item = ids[currentIndex]
-                                let token = getAccessToken?() ?? authService?.accessToken ?? initialAccessToken ?? ""
-                                let oid = item.ownerId
-                                let pid = item.photoId
-                                let key = item.accessKey ?? ""
-                                addToSavedInProgress = true
-                                addToSavedFailed = false
-                                Task {
-                                    var ok = false
-                                    if !token.isEmpty {
-                                        do {
-                                            _ = try await api.photosCopy(token: token, ownerId: oid, photoId: pid, accessKey: key)
-                                            ok = true
-                                        } catch {
-                                            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(oid) photoId=\(pid)", error: error)
-                                        }
-                                    } else {
-                                        AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
-                                    }
-                                    await MainActor.run {
-                                        addToSavedInProgress = false
-                                        showActionsOverlay = false
-                                        if ok {
-                                            addToSavedDone = true
-                                            showSavedToast = true
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                                showSavedToast = false
-                                            }
-                                        } else {
-                                            addToSavedFailed = true
-                                            showFailedToast = true
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                                showFailedToast = false
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                let title = addToSavedDone ? "Добавлено в сохранённые" : (addToSavedFailed ? "Не удалось сохранить" : "Добавить в сохранённые")
-                                Label(title, systemImage: addToSavedDone ? "checkmark.circle" : "square.and.arrow.down")
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .foregroundStyle(.primary)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(addToSavedInProgress || addToSavedDone || photoIdsForSaving == nil || vkApi == nil || currentIndex >= (photoIdsForSaving?.count ?? 0))
-                            Divider()
-                        }
-                        Button {
-                            saveCurrentPhotoToDevice()
-                        } label: {
-                            Label(saveToDeviceInProgress ? "Сохранение…" : "Скачать на устройство", systemImage: "square.and.arrow.down")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(saveToDeviceInProgress)
-                        Divider()
-                        Button {
-                            showActionsOverlay = false
-                            shareCurrentPhoto()
-                        } label: {
-                            Label(shareInProgress ? "Загрузка…" : "Отправить в …", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(shareInProgress)
-                        Divider()
-                        Button("Закрыть") {
-                            showActionsOverlay = false
-                            onDismiss()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .foregroundStyle(.primary)
-                    }
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    .frame(width: 280)
-                    .padding(.top, 56)
-                    .zIndex(20)
                 }
 
                 if showSavedToast {
@@ -649,14 +524,11 @@ struct FullScreenPhotoGalleryView: View {
                                 currentIndex = max(0, currentIndex - 1)
                             }
                         } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 28, weight: .light))
-                                .foregroundStyle(.white.opacity(0.25))
+                            Color.clear
                                 .frame(width: 56, height: 120)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .opacity(currentIndex > 0 ? 1 : 0.3)
                         .disabled(currentIndex <= 0)
                         .padding(.leading, 4)
 
@@ -667,14 +539,11 @@ struct FullScreenPhotoGalleryView: View {
                                 currentIndex = min(urls.count - 1, currentIndex + 1)
                             }
                         } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 28, weight: .light))
-                                .foregroundStyle(.white.opacity(0.25))
+                            Color.clear
                                 .frame(width: 56, height: 120)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .opacity(currentIndex < urls.count - 1 ? 1 : 0.3)
                         .disabled(currentIndex >= urls.count - 1)
                         .padding(.trailing, 4)
                     }
@@ -704,6 +573,18 @@ struct FullScreenPhotoGalleryView: View {
             if let u = shareFileURL {
                 ShareSheet(activityItems: [u])
             }
+        }
+        .confirmationDialog("", isPresented: $showActionsSheet, titleVisibility: .hidden) {
+            Button(shareInProgress ? "Загрузка…" : "Отправить в …") { shareCurrentPhoto() }
+                .disabled(shareInProgress)
+            Button(saveToDeviceInProgress ? "Сохранение…" : "Скачать на устройство") { saveCurrentPhotoToDevice() }
+                .disabled(saveToDeviceInProgress)
+            Button("Отмена", role: .cancel) { }
+        }
+        .confirmationDialog("Поделиться", isPresented: $showRepostSheet) {
+            Button("На мою страницу") { performRepost() }
+            Button("Отправить в сообщениях") { }
+            Button("Отмена", role: .cancel) { }
         }
         .confirmationDialog("", isPresented: $showOwnPhotoActionsDialog, titleVisibility: .hidden) {
             if isProfileAlbum, let makeProfile = onMakeProfilePhoto, let ids = photoIdsForSaving, currentIndex < ids.count {
@@ -765,45 +646,37 @@ struct FullScreenPhotoGalleryView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 36))
+        HStack(spacing: 0) {
+            Button { onDismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(minWidth: 56, minHeight: 56)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.leading, 12)
-            .padding(.top, 8)
-            Spacer(minLength: 0)
-            if !isSavedAlbum || (isOwnPhotos && (onDeletePhoto != nil || onMakeProfilePhoto != nil)) {
-            Button {
-                let token = resolveActionToken()
-                if !token.isEmpty { capturedTokenForSave = token }
-                AppLogger.shared.info("Gallery", "actions opened tokenEmpty=\(token.isEmpty) ownPhotos=\(isOwnPhotos)")
-                if isOwnPhotos {
-                    showOwnPhotoActionsDialog = true
-                } else {
-                    showActionsOverlay = true
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle.fill")
-                    .font(.system(size: 36))
+            .padding(.leading, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(currentIndex + 1) из \(urls.count)")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Button { showActionsSheet = true } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 20))
                     .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(minWidth: 56, minHeight: 56)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 12)
-            .padding(.top, 8)
-            }
+            .padding(.trailing, 8)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .frame(height: 44)
         .padding(.top, 8)
+        .background(Color.black.opacity(0.45).ignoresSafeArea(edges: .top))
     }
 
     private func resolveActionToken(preferCaptured: Bool = false) -> String {
@@ -928,7 +801,6 @@ struct FullScreenPhotoGalleryView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 0) {
-            // Лайки: иконка + цифра (всегда; тап — если есть onLike)
             Group {
                 if let action = onLike {
                     Button {
@@ -941,14 +813,14 @@ struct FullScreenPhotoGalleryView: View {
                     .buttonStyle(.plain)
                 } else {
                     bottomBarIconWithCount(icon: "heart", count: likesCount ?? 0)
-                    .foregroundStyle(.white)
+                        .foregroundStyle(.white)
                 }
             }
             .font(.title2)
+            .frame(width: 44)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 8)
 
-            Spacer(minLength: 0)
-
-            // Комментарии: иконка + цифра (всегда; тап — если есть контекст)
             Group {
                 if postCommentsContext != nil || photoCommentsContext != nil || onTapComments != nil {
                     Button {
@@ -966,16 +838,14 @@ struct FullScreenPhotoGalleryView: View {
                     .buttonStyle(.plain)
                 } else {
                     bottomBarIconWithCount(icon: "bubble.right", count: commentsCount ?? 0)
-                    .foregroundStyle(.white)
+                        .foregroundStyle(.white)
                 }
             }
             .font(.title2)
+            .frame(maxWidth: .infinity)
 
-            Spacer(minLength: 0)
-
-            // Репосты: кнопка (иконка + цифра); тап — wall.repost при repostObject != nil
             Button {
-                performRepost()
+                if repostObject != nil { showRepostSheet = true }
             } label: {
                 if repostInProgress {
                     ProgressView().tint(.white)
@@ -986,9 +856,11 @@ struct FullScreenPhotoGalleryView: View {
             .font(.title2)
             .foregroundStyle(.white)
             .buttonStyle(.plain)
-            .disabled(repostInProgress || (repostObject == nil))
+            .disabled(repostInProgress || repostObject == nil)
+            .frame(width: 44)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, 8)
         }
-        .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .padding(.bottom, 24)
         .background(Color.black.opacity(0.5))
