@@ -47,10 +47,18 @@ struct DrawerMenuView: View {
     private var profileBlock: some View {
         HStack(spacing: 12) {
             avatarView
-            Text(profileViewModel.user?.displayName ?? "")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profileViewModel.user?.displayName ?? "")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                if let uid = profileViewModel.user?.id {
+                    Text("@id\(uid)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -76,9 +84,9 @@ struct DrawerMenuView: View {
                 }
             }
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(Circle())
         } else {
-            RoundedRectangle(cornerRadius: 4)
+            Circle()
                 .fill(Color.white.opacity(0.2))
                 .frame(width: size, height: size)
                 .overlay(

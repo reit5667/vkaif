@@ -43,6 +43,7 @@ struct ChatView: View {
     @State private var loadingDocId: Int? = nil
     @State private var showStickerPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @FocusState private var inputFocused: Bool
 
     private let vkApi = VKApiService()
 
@@ -133,6 +134,7 @@ struct ChatView: View {
         .onAppear {
             guard let token = authService.accessToken else { return }
             viewModel.loadHistory(token: token)
+            inputFocused = false
         }
         .refreshable {
             guard let token = authService.accessToken else { return }
@@ -252,6 +254,8 @@ struct ChatView: View {
                             }
                         }
                         .listStyle(.plain)
+                        .scrollDismissesKeyboard(.immediately)
+                        .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
                         .onChange(of: viewModel.messages.count) { _, _ in
                             let newLastId = viewModel.messages.last?.id
                             guard newLastId != lastMessageId else { return }
@@ -898,6 +902,7 @@ struct ChatView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .lineLimit(1...5)
+                    .focused($inputFocused)
 
                 Button {
                     showStickerPicker = true

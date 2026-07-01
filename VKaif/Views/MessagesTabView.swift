@@ -194,7 +194,7 @@ struct MessagesTabView: View {
             }
         }
         .frame(width: VKTheme.AvatarSize.dialog, height: VKTheme.AvatarSize.dialog)
-        .clipShape(Circle())
+        .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare))
     }
 
     private func shortDate(_ date: Date) -> String {
