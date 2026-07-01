@@ -65,7 +65,7 @@ struct MessagesTabView: View {
         .onAppear { loadConversations() }
         .navigationDestination(for: ChatDestination.self) { dest in
             let vm = chatCache.viewModel(for: dest.peerId)
-            ChatView(viewModel: vm, title: dest.title, authService: authService)
+            ChatView(viewModel: vm, title: dest.title, authService: authService, initialOutRead: dest.outRead)
         }
     }
 
@@ -102,7 +102,7 @@ struct MessagesTabView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(filteredItems, id: \.conversation.peer.id) { item in
-                            NavigationLink(value: ChatDestination(peerId: item.conversation.peer.id, title: displayTitle(for: item))) {
+                            NavigationLink(value: ChatDestination(peerId: item.conversation.peer.id, title: displayTitle(for: item), outRead: item.conversation.outRead ?? 0)) {
                                 dialogRow(item)
                             }
                             .buttonStyle(.plain)
@@ -127,6 +127,7 @@ struct MessagesTabView: View {
         let unread = item.conversation.unreadCount ?? 0
         let isUnread = unread > 0
         let isOutgoing = item.lastMessage.out == 1
+        let isRead = isOutgoing && item.lastMessage.id <= (item.conversation.outRead ?? 0)
         let preview = item.lastMessage.text.isEmpty ? "Вложение" : item.lastMessage.text
 
         return HStack(spacing: 12) {
@@ -150,9 +151,14 @@ struct MessagesTabView: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(shortDate(item.lastMessage.date))
-                    .font(VKTheme.TextStyle.timestamp)
-                    .foregroundColor(isUnread ? VKTheme.Colors.badge : VKTheme.Colors.textSecondary)
+                HStack(spacing: 2) {
+                    if isOutgoing {
+                        readCheckmarks(isRead: isRead)
+                    }
+                    Text(shortDate(item.lastMessage.date))
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(isUnread ? VKTheme.Colors.badge : VKTheme.Colors.textSecondary)
+                }
                 if isUnread {
                     Text(unread > 99 ? "99+" : "\(unread)")
                         .font(VKTheme.TextStyle.badge)
@@ -168,6 +174,26 @@ struct MessagesTabView: View {
         .padding(.vertical, 10)
         .background(Color.white)
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func readCheckmarks(isRead: Bool) -> some View {
+        if isRead {
+            ZStack {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: -2)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: 2)
+            }
+            .foregroundColor(VKTheme.Colors.primary)
+            .frame(width: 14, height: 12)
+        } else {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(VKTheme.Colors.textSecondary)
+        }
     }
 
     private func displayTitle(for item: VKConversationItem) -> String {
@@ -291,8 +317,9 @@ struct MessagesTabView: View {
     }
 }
 
-/// Навигация в чат: peer_id и уже известный заголовок (чтобы не ждать getHistory).
+/// Навигация в чат: peer_id, заголовок и out_read из conversations (ID последнего прочитанного исходящего).
 struct ChatDestination: Hashable {
     let peerId: Int
     let title: String
+    let outRead: Int
 }

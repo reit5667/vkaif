@@ -10,6 +10,7 @@ struct ChatView: View {
     @ObservedObject var viewModel: ChatViewModel
     let title: String?
     @ObservedObject var authService: AuthService
+    var initialOutRead: Int = 0
 
     // UI-only state (не нужно кэшировать между переходами)
     @State private var inputText: String = ""
@@ -159,6 +160,9 @@ struct ChatView: View {
         }
         .onAppear {
             guard let token = authService.accessToken else { return }
+            if viewModel.outRead == 0 && initialOutRead > 0 {
+                viewModel.outRead = initialOutRead
+            }
             viewModel.loadHistory(token: token)
             inputFocused = false
         }
@@ -277,9 +281,13 @@ struct ChatView: View {
                                             : Color.clear
                                     )
                                     .animation(.easeOut(duration: 0.4), value: highlightedMessageId)
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
                             }
                         }
                         .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .environment(\.defaultMinListRowHeight, 0)
                         .scrollDismissesKeyboard(.immediately)
                         .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
                         .onChange(of: viewModel.messages.count) { _, _ in
@@ -344,10 +352,13 @@ struct ChatView: View {
         return HStack(alignment: .bottom, spacing: 4) {
             if isOut { Spacer(minLength: 48) }
             if isOut {
-                Text(shortTime(msg.date))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 4)
+                HStack(spacing: 2) {
+                    chatReadCheckmarks(isRead: viewModel.outRead > 0 && msg.id <= viewModel.outRead)
+                    Text(shortTime(msg.date))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 4)
             }
             if !isOut {
                 incomingAvatar(fromId: msg.fromId)
@@ -1006,6 +1017,26 @@ struct ChatView: View {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
         return f.string(from: date)
+    }
+
+    @ViewBuilder
+    private func chatReadCheckmarks(isRead: Bool) -> some View {
+        if isRead {
+            ZStack {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: -2)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: 2)
+            }
+            .foregroundColor(VKTheme.Colors.primary)
+            .frame(width: 14, height: 12)
+        } else {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.secondary)
+        }
     }
 
     private func sendMessage() {

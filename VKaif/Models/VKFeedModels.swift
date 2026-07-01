@@ -1036,11 +1036,15 @@ struct VKConversation: Decodable {
     let peer: VKConversationPeer
     let chatSettings: VKConversationSettings?
     let unreadCount: Int?
+    let inRead: Int?
+    let outRead: Int?
 
     enum CodingKeys: String, CodingKey {
         case peer
         case chatSettings = "chat_settings"
         case unreadCount = "unread_count"
+        case inRead = "in_read"
+        case outRead = "out_read"
     }
 }
 

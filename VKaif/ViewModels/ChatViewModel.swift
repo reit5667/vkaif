@@ -15,6 +15,8 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var deleteInProgress: Set<Int> = []
     /// Выставляется после loadMoreHistory — вид прокручивает к этому id, затем сбрасывает в nil.
     @Published var scrollToTopId: Int? = nil
+    /// ID последнего исходящего сообщения, прочитанного собеседником (из conversation.out_read).
+    @Published var outRead: Int = 0
 
     private(set) var lastMessageId: Int? = nil
     private let vkApi = VKApiService()

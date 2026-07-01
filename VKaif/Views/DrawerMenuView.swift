@@ -10,6 +10,7 @@ struct DrawerMenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            appNameLabel
             profileBlock
             Divider()
                 .overlay(Color.white.opacity(0.15))
@@ -22,6 +23,19 @@ struct DrawerMenuView: View {
         .onAppear { profileViewModel.loadProfileIfNeeded() }
     }
 
+    private var appNameLabel: some View {
+        HStack(spacing: 0) {
+            Text("VK")
+                .font(.system(size: 20, weight: .bold))
+            Text("айф")
+                .font(.system(size: 20, weight: .regular))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 16)
+        .padding(.top, 56)
+        .padding(.bottom, 10)
+    }
+
     private var profileBlock: some View {
         HStack(spacing: 12) {
             avatarView
@@ -32,7 +46,7 @@ struct DrawerMenuView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 56)
+        .padding(.top, 0)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
