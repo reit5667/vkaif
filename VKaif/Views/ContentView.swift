@@ -148,6 +148,16 @@ struct ContentView: View {
             sectionView(ProfileView(authService: authService, viewModel: profileViewModel))
         case .groups:
             sectionView(groupsSectionView)
+        case .photos:
+            sectionView(photosSectionView)
+        case .video:
+            sectionView(stubView(title: "Видеозаписи", icon: "video"))
+        case .audio:
+            sectionView(stubView(title: "Аудиозаписи", icon: "music.note"))
+        case .answers:
+            sectionView(stubView(title: "Ответы", icon: "bell"))
+        case .bookmarks:
+            sectionView(stubView(title: "Закладки", icon: "bookmark"))
         case .search:
             sectionView(searchStubView)
         case .settings:
@@ -162,6 +172,28 @@ struct ContentView: View {
             .toolbar { ToolbarItem(placement: .navigationBarLeading) { feedDrawerButton } }
     }
 
+    private var photosSectionView: some View {
+        ProfilePhotoTabView(
+            albums: profileViewModel.albums,
+            loadState: profileViewModel.albumsLoadState,
+            authService: authService,
+            ownerId: profileViewModel.user?.id ?? 0,
+            isOwnProfile: true,
+            onRefresh: {
+                if let uid = profileViewModel.user?.id {
+                    await profileViewModel.loadAlbums(ownerId: uid, forceRefresh: true)
+                }
+            }
+        )
+        .navigationTitle("Фотографии")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let uid = profileViewModel.user?.id {
+                Task { await profileViewModel.loadAlbums(ownerId: uid, forceRefresh: false) }
+            }
+        }
+    }
+
     private var groupsSectionView: some View {
         ProfileGroupsTabView(
             groups: profileViewModel.groups,
@@ -174,6 +206,11 @@ struct ContentView: View {
         .navigationTitle("Группы")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { Task { await profileViewModel.loadGroups(forceRefresh: false) } }
+    }
+
+    private func stubView(title: String, icon: String) -> some View {
+        ContentUnavailableView(title, systemImage: icon, description: Text("Раздел в разработке"))
+            .navigationTitle(title)
     }
 
     private var searchStubView: some View {
@@ -908,7 +945,7 @@ enum FeedLoadState {
 // MARK: - Разделы приложения (drawer-навигация)
 
 enum AppSection {
-    case feed, friends, messages, profile, groups, search, settings
+    case feed, friends, messages, profile, groups, photos, video, audio, answers, bookmarks, search, settings
 }
 
 #Preview {

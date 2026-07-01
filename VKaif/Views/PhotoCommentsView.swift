@@ -65,6 +65,7 @@ struct PhotoCommentsView: View {
             }
             .navigationTitle("Комментарии к фото")
             .navigationBarTitleDisplayMode(.inline)
+            .vkBlueNavBar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {

@@ -483,7 +483,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "sort", value: sort),
             URLQueryItem(name: "need_likes", value: String(needLikes)),
             URLQueryItem(name: "extended", value: String(extended)),
-            URLQueryItem(name: "thread_items_count", value: String(threadItemsCount))
+            URLQueryItem(name: "thread_items_count", value: String(threadItemsCount)),
+            URLQueryItem(name: "fields", value: "photo_50")
         ]
         guard var components = URLComponents(string: "\(baseURL)/wall.getComments") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems

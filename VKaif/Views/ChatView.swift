@@ -58,6 +58,32 @@ struct ChatView: View {
         return nil
     }
 
+    @ViewBuilder
+    private func incomingAvatar(fromId: Int) -> some View {
+        let url: URL? = {
+            if fromId > 0 {
+                return viewModel.profiles.first(where: { $0.id == fromId })?.photo50.flatMap { URL(string: $0) }
+            } else if fromId < 0 {
+                return viewModel.groups.first(where: { $0.id == abs(fromId) })?.photo50.flatMap { URL(string: $0) }
+            }
+            return chatAvatarURL
+        }()
+        if let url {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img): img.resizable().scaledToFill()
+                default: Color(.systemGray4)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        } else {
+            Color(.systemGray4)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
     private var chatTitle: String {
         if let t = title, !t.isEmpty { return t }
         if peerId >= 200_000_0000 { return "Беседа" }
@@ -247,7 +273,7 @@ struct ChatView: View {
                                     .id(msg.id)
                                     .background(
                                         highlightedMessageId == msg.id
-                                            ? VKTheme.Colors.incomingBubble.opacity(0.5)
+                                            ? Color.white.opacity(0.5)
                                             : Color.clear
                                     )
                                     .animation(.easeOut(duration: 0.4), value: highlightedMessageId)
@@ -315,8 +341,17 @@ struct ChatView: View {
         let isOut = (msg.out ?? 0) == 1
         let deleting = viewModel.deleteInProgress.contains(msg.id)
         let isPinned = viewModel.pinnedMessage?.id == msg.id
-        return HStack {
+        return HStack(alignment: .bottom, spacing: 4) {
             if isOut { Spacer(minLength: 48) }
+            if isOut {
+                Text(shortTime(msg.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 4)
+            }
+            if !isOut {
+                incomingAvatar(fromId: msg.fromId)
+            }
             VStack(alignment: isOut ? .trailing : .leading, spacing: 2) {
                 let photos = (msg.attachments ?? []).compactMap { $0.photo }
                 let sticker = (msg.attachments ?? []).first(where: { $0.type == "sticker" })?.sticker
@@ -336,7 +371,7 @@ struct ChatView: View {
                             Text(msg.text)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+                                .background(isOut ? VKTheme.Colors.incomingBubble : Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         ForEach(Array(videos.enumerated()), id: \.offset) { _, video in
@@ -351,7 +386,7 @@ struct ChatView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: isOut ? .trailing : .leading)
-                                .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+                                .background(isOut ? VKTheme.Colors.incomingBubble : Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         ForEach(Array(wallPosts.enumerated()), id: \.offset) { _, post in
@@ -397,17 +432,14 @@ struct ChatView: View {
                         }
                     }
                     .padding(.vertical, msg.text.isEmpty && msg.replyMessage == nil && !photos.isEmpty ? 0 : 0)
-                    .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+                    .background(isOut ? VKTheme.Colors.incomingBubble : Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.bubble))
                     .overlay(
-                        isOut ? RoundedRectangle(cornerRadius: VKTheme.Radius.bubble)
-                            .strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card) : nil
+                        RoundedRectangle(cornerRadius: VKTheme.Radius.bubble)
+                            .strokeBorder(VKTheme.Colors.separator, lineWidth: VKTheme.Border.card)
                     )
                     .opacity(deleting ? 0.5 : 1.0)
                 }
-                Text(shortTime(msg.date))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             .contextMenu {
                 Button { replyToMessage = msg } label: {
@@ -441,6 +473,12 @@ struct ChatView: View {
                         Label("Удалить", systemImage: "trash")
                     }
                 }
+            }
+            if !isOut {
+                Text(shortTime(msg.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 4)
             }
             if !isOut { Spacer(minLength: 48) }
         }
@@ -559,7 +597,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(isOut ? Color.white : VKTheme.Colors.incomingBubble)
+        .background(isOut ? VKTheme.Colors.incomingBubble : Color.white)
         .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.bubble))
     }
 

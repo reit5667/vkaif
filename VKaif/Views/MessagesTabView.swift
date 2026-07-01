@@ -13,6 +13,7 @@ struct MessagesTabView: View {
     @State private var isLoadingMore: Bool = false
     @State private var loadState: LoadState = .idle
     @State private var searchText: String = ""
+    @State private var isSearchActive: Bool = false
 
     private var filteredItems: [VKConversationItem] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return items }
@@ -48,6 +49,19 @@ struct MessagesTabView: View {
         }
         .navigationTitle("Сообщения")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isSearchActive.toggle()
+                        if !isSearchActive { searchText = "" }
+                    }
+                } label: {
+                    Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
+                        .foregroundColor(.white)
+                }
+            }
+        }
         .onAppear { loadConversations() }
         .navigationDestination(for: ChatDestination.self) { dest in
             let vm = chatCache.viewModel(for: dest.peerId)
@@ -58,22 +72,24 @@ struct MessagesTabView: View {
     @ViewBuilder
     private var listContent: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(VKTheme.Colors.textSecondary)
-                TextField("Поиск", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(VKTheme.Colors.textSecondary)
+            if isSearchActive {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                    TextField("Поиск", text: $searchText)
+                        .textFieldStyle(.plain)
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(VKTheme.Colors.textSecondary)
+                        }
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
+                Divider()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(.systemGray6))
-            Divider()
 
             if filteredItems.isEmpty {
                 ContentUnavailableView(
@@ -117,17 +133,17 @@ struct MessagesTabView: View {
             avatarView(url: avatarURL(for: item))
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayTitle(for: item))
-                    .font(.system(size: 15, weight: isUnread ? .bold : .semibold))
+                    .font(.system(size: 17, weight: isUnread ? .bold : .semibold))
                     .foregroundColor(VKTheme.Colors.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 0) {
                     if isOutgoing {
                         Text("Вы: ")
-                            .font(VKTheme.TextStyle.dialogPreview)
+                            .font(.system(size: 15))
                             .foregroundColor(VKTheme.Colors.textSecondary)
                     }
                     Text(preview)
-                        .font(VKTheme.TextStyle.dialogPreview)
+                        .font(.system(size: 15))
                         .foregroundColor(VKTheme.Colors.textSecondary)
                         .lineLimit(1)
                 }

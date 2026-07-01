@@ -8,14 +8,8 @@ struct DrawerMenuView: View {
     @Binding var isOpen: Bool
     let unreadMessagesCount: Int
 
-    @State private var searchText = ""
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            searchBar
-                .padding(.top, 56)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
             profileBlock
             Divider()
                 .overlay(Color.white.opacity(0.15))
@@ -28,41 +22,18 @@ struct DrawerMenuView: View {
         .onAppear { profileViewModel.loadProfileIfNeeded() }
     }
 
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.white.opacity(0.55))
-                .font(.system(size: 14))
-            TextField("Поиск", text: $searchText)
-                .font(.system(size: 15))
-                .foregroundColor(.white)
-                .tint(.white)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Color.white.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
     private var profileBlock: some View {
         HStack(spacing: 12) {
             avatarView
-            VStack(alignment: .leading, spacing: 2) {
-                Text(profileViewModel.user?.displayName ?? "")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                if let uid = profileViewModel.user?.id {
-                    Text("@id\(uid)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
-            }
+            Text(profileViewModel.user?.displayName ?? "")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.top, 56)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -84,9 +55,9 @@ struct DrawerMenuView: View {
                 }
             }
             .frame(width: size, height: size)
-            .clipShape(Circle())
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
-            Circle()
+            RoundedRectangle(cornerRadius: 4)
                 .fill(Color.white.opacity(0.2))
                 .frame(width: size, height: size)
                 .overlay(
@@ -99,17 +70,27 @@ struct DrawerMenuView: View {
 
     private var menuItems: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DrawerItem(icon: "house.fill",       title: "Лента",       section: .feed,     activeSection: $activeSection, isOpen: $isOpen)
+            DrawerItem(icon: "house.fill",       title: "Лента",         section: .feed,      activeSection: $activeSection, isOpen: $isOpen)
             drawerDivider
-            DrawerItem(icon: "person.2.fill",    title: "Друзья",      section: .friends,  activeSection: $activeSection, isOpen: $isOpen)
+            DrawerItem(icon: "person.2.fill",    title: "Друзья",        section: .friends,   activeSection: $activeSection, isOpen: $isOpen)
             drawerDivider
-            DrawerItem(icon: "message.fill",     title: "Сообщения",   section: .messages, activeSection: $activeSection, isOpen: $isOpen, badge: unreadMessagesCount)
+            DrawerItem(icon: "message.fill",     title: "Сообщения",     section: .messages,  activeSection: $activeSection, isOpen: $isOpen, badge: unreadMessagesCount)
             drawerDivider
-            DrawerItem(icon: "person.3.fill",    title: "Группы",      section: .groups,   activeSection: $activeSection, isOpen: $isOpen)
+            DrawerItem(icon: "person.3.fill",    title: "Группы",        section: .groups,    activeSection: $activeSection, isOpen: $isOpen)
             drawerDivider
-            DrawerItem(icon: "magnifyingglass",  title: "Поиск",       section: .search,   activeSection: $activeSection, isOpen: $isOpen)
+            DrawerItem(icon: "photo.on.rectangle", title: "Фотографии",  section: .photos,    activeSection: $activeSection, isOpen: $isOpen)
             drawerDivider
-            DrawerItem(icon: "gearshape.fill",   title: "Настройки",   section: .settings, activeSection: $activeSection, isOpen: $isOpen)
+            DrawerItem(icon: "video",            title: "Видеозаписи",   section: .video,     activeSection: $activeSection, isOpen: $isOpen, isStub: true)
+            drawerDivider
+            DrawerItem(icon: "music.note",       title: "Аудиозаписи",   section: .audio,     activeSection: $activeSection, isOpen: $isOpen, isStub: true)
+            drawerDivider
+            DrawerItem(icon: "bell",             title: "Ответы",        section: .answers,   activeSection: $activeSection, isOpen: $isOpen, isStub: true)
+            drawerDivider
+            DrawerItem(icon: "bookmark",         title: "Закладки",      section: .bookmarks, activeSection: $activeSection, isOpen: $isOpen, isStub: true)
+            drawerDivider
+            DrawerItem(icon: "magnifyingglass",  title: "Поиск",         section: .search,    activeSection: $activeSection, isOpen: $isOpen)
+            drawerDivider
+            DrawerItem(icon: "gearshape.fill",   title: "Настройки",     section: .settings,  activeSection: $activeSection, isOpen: $isOpen)
         }
     }
 
@@ -127,6 +108,7 @@ private struct DrawerItem: View {
     @Binding var activeSection: AppSection
     @Binding var isOpen: Bool
     var badge: Int = 0
+    var isStub: Bool = false
 
     private var isActive: Bool { activeSection == section }
 
@@ -138,11 +120,11 @@ private struct DrawerItem: View {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .frame(width: 22)
-                    .foregroundColor(isActive ? .white : .white.opacity(0.7))
+                    .foregroundColor(itemColor)
                     .font(.system(size: 16))
                 Text(title)
-                    .font(.system(size: 15, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? .white : .white.opacity(0.85))
+                    .font(.system(size: 17, weight: isActive ? .semibold : .regular))
+                    .foregroundColor(itemColor)
                 Spacer()
                 if badge > 0 {
                     Text(badge > 99 ? "99+" : "\(badge)")
@@ -159,5 +141,10 @@ private struct DrawerItem: View {
             .background(isActive ? Color.white.opacity(0.12) : Color.clear)
         }
         .buttonStyle(.plain)
+    }
+
+    private var itemColor: Color {
+        if isStub { return .white.opacity(0.35) }
+        return isActive ? .white : .white.opacity(0.85)
     }
 }

@@ -70,6 +70,7 @@ struct DialogMaterialsView: View {
             }
             .navigationTitle("Материалы диалога")
             .navigationBarTitleDisplayMode(.inline)
+            .vkBlueNavBar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Готово") { dismiss() }
